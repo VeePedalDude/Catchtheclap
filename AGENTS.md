@@ -156,6 +156,15 @@ Rules 1–4 keep the work right; these keep it short.
     and warnings are explained. Provide the artifact and measured report. Stop; make no speculative
     controls, cosmetic passes or unrelated changes.
 
+20. **Fit displayed text to its actual window.** Render labels and readouts at the normal
+    design font size first, then measure the rendered width against the space available after
+    padding. Reduce font size only as much as needed, down to a defined legible minimum; if that
+    still will not fit, use a shorter display label, wrap where the layout permits, or truncate
+    with a clear indication. Recalculate when the container or text changes. Never clip or
+    overlap controls, and do not rename a parameter's stable `symbol` to make its label fit.
+    A `screen.js` may apply this rule to text it draws; resizing the rig's built-in knob labels
+    requires a change in the RIG/01 host UI, not just plugin metadata.
+
 **The test:** every command you ran answered a question you had, and every line you wrote traces to
 the request.
 
