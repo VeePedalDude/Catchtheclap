@@ -8,7 +8,7 @@ static Signal tone(float hz,float rms=0.025f,float seconds=3.f,float sr=48000.f)
   for(size_t i=0;i<a.size();++i)a[i]=rms*1.41421356f*sinf(2.f*rig::PI_F*hz*(float)i/sr);
   return a;
 }
-static Signal noise(float rms=.001f,float seconds=4.f,float sr=48000.f) {
+static Signal benchNoise(float rms=.001f,float seconds=4.f,float sr=48000.f) {
   Signal a((size_t)(sr*seconds));
   uint32_t rng=0x9e3779b9u;
   for(size_t i=0;i<a.size();++i){rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;
@@ -56,14 +56,14 @@ TEST("INPUT trim changes level by the requested 12 dB difference") {
 
 TEST("AUTO background analysis learns a stationary -60 dBFS noise floor") {
   Fx<rig::DiSentinel> fx;setup(fx);fx.set("clean",80);
-  fx.run(noise(.001f,5.f));
+  fx.run(benchNoise(.001f,5.f));
   const float estimateDb=fx.meters()[0]*80.f-100.f;
   CHECK(estimateDb>-65.f && estimateDb<-57.f,"AUTO floor after 5 s of -60 dBFS hiss: %.2f dBFS",estimateDb);
 }
 
 TEST("SMART gain reduces steady background noise after auto learning") {
   Fx<rig::DiSentinel> fx;setup(fx);fx.set("clean",100);fx.set("release",90);
-  const Signal n=noise(.001f,6.f);const auto y=fx.run(n).L;
+  const Signal n=benchNoise(.001f,6.f);const auto y=fx.run(n).L;
   const float before=rmsAt(n,4.5f,5.5f),after=rmsAt(y,4.5f,5.5f);
   const float reductionDb=20.f*log10f(before/fmaxf(after,1e-9f));
   CHECK(reductionDb>15.f,"CLEAN 100: steady -60 dBFS noise reduced %.2f dB",reductionDb);
@@ -89,7 +89,7 @@ TEST("RELEASE changes the amount of background noise immediately after playing")
   fast.set("hold",0);slow.set("hold",0);
   fast.set("release",45);slow.set("release",1100);
   // Pre-learn on noise, play a note, return to noise.
-  const Signal a=noise(.001f,2.f),b=tone(330,.16f,1.f),c=noise(.001f,1.4f);
+  const Signal a=benchNoise(.001f,2.f),b=tone(330,.16f,1.f),c=benchNoise(.001f,1.4f);
   Signal s=a;s.insert(s.end(),b.begin(),b.end());s.insert(s.end(),c.begin(),c.end());
   const float fa=rmsAt(fast.run(s).L,3.60f,3.82f);
   const float sl=rmsAt(slow.run(s).L,3.60f,3.82f);
@@ -99,7 +99,7 @@ TEST("RELEASE changes the amount of background noise immediately after playing")
 TEST("LEARN deliberately captures a louder floor that AUTO avoids") {
   Fx<rig::DiSentinel> manual,automatic;setup(manual);setup(automatic);
   manual.setStop("learn","LEARN");
-  const Signal n=noise(.014f,3.f);
+  const Signal n=benchNoise(.014f,3.f);
   manual.run(n);automatic.run(n);
   const float m=manual.meters()[0]*80.f-100.f;
   const float a=automatic.meters()[0]*80.f-100.f;
@@ -109,14 +109,14 @@ TEST("LEARN deliberately captures a louder floor that AUTO avoids") {
 TEST("CLEAN zero retains the filtered signal, unaffected by noise expansion") {
   Fx<rig::DiSentinel> off,on;setup(off);setup(on);
   off.set("clean",0);on.set("clean",100);
-  const Signal n=noise(.001f,5.f);
+  const Signal n=benchNoise(.001f,5.f);
   const float dry=rmsAt(off.run(n).L,4.f,5.f),cleaned=rmsAt(on.run(n).L,4.f,5.f);
   CHECK(dry>cleaned*5.f,"CLEAN 0 noise RMS %.6f, CLEAN 100 %.6f",dry,cleaned);
 }
 
 TEST("floor and attenuation meters expose two independent bounded measurements") {
   Fx<rig::DiSentinel> fx;setup(fx);fx.set("clean",100);
-  fx.run(noise(.001f,5.f));const auto meters=fx.meters();
+  fx.run(benchNoise(.001f,5.f));const auto meters=fx.meters();
   CHECK(meters[0]>=0.f&&meters[0]<=1.f&&meters[1]>=0.f&&meters[1]<=1.f&&meters[1]>.85f,
         "floor %.4f, gain reduction %.4f (normalized)",meters[0],meters[1]);
 }
