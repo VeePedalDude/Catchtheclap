@@ -165,6 +165,16 @@ Rules 1–4 keep the work right; these keep it short.
     A `screen.js` may apply this rule to text it draws; resizing the rig's built-in knob labels
     requires a change in the RIG/01 host UI, not just plugin metadata.
 
+21. **Keep UI text short and meaningful.** Prefer knob display labels of 10 characters or
+    fewer (the current checker warns above 10); keep plugin ids at 12 characters or fewer and
+    parameter `symbol` identifiers at 16 or fewer, as the SDK specifies. Use short, distinct
+    mode names, meter labels, titles and subtitles; write the full explanation in documentation
+    or help text rather than forcing it into a small control. Do not abbreviate so aggressively
+    that two controls become ambiguous. Count units and live values when checking the displayed
+    width. For text longer than its available space, apply Rule 20's measured font fitting and
+    readable fallback. Verify the smallest supported window; character count is a guideline,
+    while actual rendered width determines whether text fits.
+
 **The test:** every command you ran answered a question you had, and every line you wrote traces to
 the request.
 
