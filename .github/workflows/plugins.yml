@@ -1,0 +1,36 @@
+# Builds every plugin in plugins/ for Windows, Linux and the browser, checks it, and offers the .rigfx
+# bundles for download (the run's "rigfx" artifact). A tag (v1.2.0) also attaches them to a release.
+name: plugins
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: zig (builds all three targets)
+        run: pip install ziglang==0.17.0
+      - name: the checker checks itself
+        run: python3 tests/selftest.py
+      - name: build and check every plugin
+        run: python3 tools/check.py --all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rigfx
+          path: dist/plugins/*.rigfx
+          if-no-files-found: warn
+      - name: attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Plugins built from $GITHUB_SHA"
+          gh release upload "$GITHUB_REF_NAME" dist/plugins/*.rigfx --clobber

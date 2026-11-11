@@ -1,0 +1,119 @@
+{
+  "builtinEffects": [
+    "amp",
+    "bax",
+    "cab",
+    "comb",
+    "diode",
+    "dyneq",
+    "formant",
+    "gate",
+    "geq",
+    "holo",
+    "hyped",
+    "ladder",
+    "ota",
+    "peq",
+    "polyv",
+    "prog",
+    "sallen",
+    "stack",
+    "svf",
+    "tess",
+    "tilt"
+  ],
+  "builtinSources": [
+    "adsr",
+    "ctrl",
+    "env",
+    "geo",
+    "heart",
+    "lfo",
+    "orbit",
+    "seq"
+  ],
+  "effectCategories": [
+    {
+      "id": "dynamics",
+      "label": "Dynamics",
+      "what": "gates, compressors, limiters"
+    },
+    {
+      "id": "drive",
+      "label": "Amps & drive",
+      "what": "amp captures, overdrive, distortion, fuzz"
+    },
+    {
+      "id": "cab",
+      "label": "Cabs & IRs",
+      "what": "speaker cabinets, impulse responses"
+    },
+    {
+      "id": "filter",
+      "label": "Filter & EQ",
+      "what": "EQs, wahs, filters"
+    },
+    {
+      "id": "synth",
+      "label": "Synth filters",
+      "what": "filters from classic synths: ladders, state-variable, diode, Sallen-Key, comb, formant"
+    },
+    {
+      "id": "voice",
+      "label": "Synth voices",
+      "what": "your chords played by other instruments: tape keyboards, polysynths"
+    },
+    {
+      "id": "modulation",
+      "label": "Modulation",
+      "what": "chorus, flanger, phaser, tremolo, vibrato"
+    },
+    {
+      "id": "pitch",
+      "label": "Pitch",
+      "what": "octaves, harmonies, pitch shifting"
+    },
+    {
+      "id": "delay",
+      "label": "Delay",
+      "what": "echoes and repeats"
+    },
+    {
+      "id": "reverb",
+      "label": "Reverb",
+      "what": "rooms, halls, plates, spaces"
+    },
+    {
+      "id": "utility",
+      "label": "Utility",
+      "what": "volume, splits, tools"
+    },
+    {
+      "id": "experimental",
+      "label": "Experimental",
+      "what": "anything that doesn't fit a box"
+    }
+  ],
+  "sourceCategories": [
+    {
+      "id": "time",
+      "label": "Time & tempo",
+      "what": "LFOs, sequencers, clocks, tempo-synced shapes"
+    },
+    {
+      "id": "playing",
+      "label": "Your playing",
+      "what": "envelopes, pick triggers, pitch and dynamics followers"
+    },
+    {
+      "id": "chaos",
+      "label": "Physics & chaos",
+      "what": "orbits, random walks, simulations"
+    },
+    {
+      "id": "outside",
+      "label": "Outside world",
+      "what": "controllers, sensors, the body"
+    }
+  ]
+}
