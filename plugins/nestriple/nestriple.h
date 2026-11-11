@@ -1,125 +1,163 @@
-// plugins/nestriple/nestriple.h - NES TRIPLE: three stepped-volume lo-fi echo stages with 6 FM-style routes.
-// TIME 30..300ms, INTERVAL 0.5..2x, DECAY 0..90%, DEGRADE 0..100%, ORDER ABC..CBA,
-// FEEDBACK 0..80%, RETURN FRONT/MIDDLE, MIX 0..100%. Defaults: 120ms, 1x, 60%, 20%, ABC, 20%, FRONT, 35%.
+// plugins/nestriple/nestriple.h - BITROT MATRIX: eight 3-node echo algorithms, six regenerative paths.
+// TIME 30..2000 ms, INTERVAL 0.5..2x, DECAY 0..90%, DEGRADE 0..100%, ORDER 8 algorithms,
+// FEEDBACK 0..80%, RETURN 6 patterns, MIX 0..100%. Defaults: 120ms, 1x, 60%, 20%, SERIES, 20%, WRAP, 35%.
 #pragma once
 #include "module.h"
 
 namespace rig {
 
-inline constexpr ParamStop NESTRIPLE_ORDERS[] = {
-  {0.f, "ABC"}, {1.f, "ACB"}, {2.f, "BAC"},
-  {3.f, "BCA"}, {4.f, "CAB"}, {5.f, "CBA"}
+inline constexpr ParamStop BITROT_ORDERS[] = {
+  {0.f,"SERIES"}, {1.f,"PARALLEL"}, {2.f,"FORK"}, {3.f,"MERGE"},
+  {4.f,"REVERSE"}, {5.f,"LADDER"}, {6.f,"CENTER"}, {7.f,"BRIDGE"}
 };
-inline constexpr ParamStop NESTRIPLE_RETURNS[] = {{0.f, "FRONT"}, {1.f, "MIDDLE"}};
-inline constexpr int NESTRIPLE_ROUTES[6][3] = {
-  {0,1,2}, {0,2,1}, {1,0,2}, {1,2,0}, {2,0,1}, {2,1,0}
+inline constexpr ParamStop BITROT_RETURNS[] = {
+  {0.f,"WRAP"}, {1.f,"MIDDLE"}, {2.f,"SPLIT"},
+  {3.f,"LOCAL"}, {4.f,"CHAIN"}, {5.f,"CROSS"}
 };
-inline constexpr ParamDesc NESTRIPLE_PARAMS[] = {
-  {"time",     "TIME",     30.f, 300.f, 0.60206f, "ms", Curve::Log, 0, false},
-  {"interval", "INTERVAL", 0.5f, 2.f,   1.f/3.f,  "x",  Curve::Lin, 2, false},
-  {"decay",    "DECAY",    0.f,  90.f,  2.f/3.f,  "%", Curve::Lin, 0, false},
-  {"degrade",  "DEGRADE",  0.f, 100.f,  0.2f,     "%", Curve::Lin, 0, false},
-  {"order",    "ORDER",    0.f,   5.f,  0.f,      "",  Curve::Lin, 0, false, NESTRIPLE_ORDERS, 6},
-  {"feedback", "FEEDBACK", 0.f,  80.f,  0.25f,    "%", Curve::Lin, 0, false},
-  {"return",   "RETURN",   0.f,   1.f,  0.f,      "",  Curve::Lin, 0, false, NESTRIPLE_RETURNS, 2},
-  {"mix",      "MIX",      0.f, 100.f,  0.35f,    "%", Curve::Lin, 0, false}
+// Destination row, source column: the graph only accesses nodes already calculated in 'seq'.
+struct BitrotRoute { unsigned char seq[3]; float dry[3]; float link[3][3]; };
+inline constexpr BitrotRoute BITROT_ROUTES[] = {
+  {{0,1,2},{1,0,0},{{0,0,0},{1,0,0},{0,1,0}}}, // A -> B -> C
+  {{0,1,2},{1,1,1},{{0,0,0},{0,0,0},{0,0,0}}}, // three independent taps
+  {{0,1,2},{1,0,0},{{0,0,0},{1,0,0},{1,0,0}}}, // A forks to B and C
+  {{0,1,2},{1,1,0},{{0,0,0},{0,0,0},{.5f,.5f,0}}}, // A and B merge into C
+  {{2,1,0},{0,0,1},{{0,1,0},{0,0,1},{0,0,0}}}, // C -> B -> A
+  {{0,1,2},{1,0,0},{{0,0,0},{1,0,0},{.5f,.5f,0}}}, // A -> B, A+B -> C
+  {{1,0,2},{0,1,0},{{0,1,0},{0,0,0},{0,1,0}}}, // B forks to A and C
+  {{0,1,2},{1,0,.5f},{{0,0,0},{1,0,0},{0,.5f,0}}} // A->B->C plus dry to C
 };
-inline constexpr ModuleDesc NESTRIPLE_DESC = {
-  "nestriple", "NES TRIPLE", "degrading 3-stage echo", 8, NESTRIPLE_PARAMS, 2, {"order", "feedback"}
+inline constexpr ParamDesc BITROT_PARAMS[] = {
+  {"time",     "TIME",     30.f, 2000.f, .33011f, "ms", Curve::Log, 0, false},
+  {"interval", "INTERVAL", .5f,   2.f,    1.f/3.f,  "x", Curve::Lin, 2, false},
+  {"decay",    "DECAY",    0.f,   90.f,   2.f/3.f,  "%", Curve::Lin, 0, false},
+  {"degrade",  "DEGRADE",  0.f,  100.f,    .2f,     "%", Curve::Lin, 0, false},
+  {"order",    "ROUTE",    0.f,    7.f,    0.f,     "", Curve::Lin, 0, false, BITROT_ORDERS, 8},
+  {"feedback", "FEEDBACK", 0.f,   80.f,    .25f,    "%", Curve::Lin, 0, false},
+  {"return",   "RETURN",   0.f,    5.f,    0.f,     "", Curve::Lin, 0, false, BITROT_RETURNS, 6},
+  {"mix",      "MIX",      0.f,  100.f,    .35f,    "%", Curve::Lin, 0, false}
+};
+inline constexpr ModuleDesc BITROT_DESC = {
+  "nestriple", "BITROT MATRIX", "8 routes / 6 return paths", 8, BITROT_PARAMS, 2, {"order","feedback"}
 };
 
+// The 8 kHz internal audio clock is deliberate: six low-resolution delay lines for 1.5 MB total.
+// A 2 s base multiplied by the maximum interval (x4 on C) reaches 8 s per stage.
+struct BitrotLine {
+  static constexpr int SIZE=65536, MASK=SIZE-1;
+  float l[SIZE], r[SIZE];
+  int index=0;
+  void clear() { memset(l,0,sizeof l); memset(r,0,sizeof r); index=0; }
+  void push(float a,float b) { l[index]=a; r[index]=b; index=(index+1)&MASK; }
+  float tapL(int samples) const { return l[(index-samples)&MASK]; }
+  float tapR(int samples) const { return r[(index-samples)&MASK]; }
+};
 struct NesTriple : Module {
-  static constexpr int MEMORY = 131072; // longest stage: 1.2 s at 96 kHz < 131072 samples
-  DelayLine<MEMORY> left[3], right[3];
-  OnePole timeS, intervalS, decayS, degradeS, feedbackS, returnS, mixS, alphaS[3];
-  float lpL[3] = {0}, lpR[3] = {0}, heldL[3] = {0}, heldR[3] = {0};
-  int holdCount[3] = {0};
-  float lastL = 0.f, lastR = 0.f, shownFeedback = 0.f;
-  int shownOrder = 0;
+  static constexpr float INTERNAL_SR=8000.f;
+  BitrotLine delay[3];
+  OnePole timeS, intervalS, decayS, damageS, feedbackS, mixS;
+  float clockStep=1.f/6.f, phase=0.f, accL=0.f, accR=0.f, wetL=0.f, wetR=0.f;
+  int accCount=0, heldCount[3]={0};
+  float lpL[3]={0}, lpR[3]={0}, heldL[3]={0}, heldR[3]={0};
+  float prevL[3]={0}, prevR[3]={0};
+  int displayOrder=0; float displayFeedback=0;
 
-  const ModuleDesc& desc() const override { return NESTRIPLE_DESC; }
+  const ModuleDesc& desc() const override { return BITROT_DESC; }
   void init(float s) override {
-    sr = s;
-    timeS.setMs(sr, 35); intervalS.setMs(sr, 35); decayS.setMs(sr, 25);
-    degradeS.setMs(sr, 30); feedbackS.setMs(sr, 30); returnS.setMs(sr, 35);
-    mixS.setMs(sr, 25);
-    for (auto& a : alphaS) a.setMs(sr, 35);
+    sr=s; clockStep=INTERNAL_SR/sr;
+    timeS.setMs(INTERNAL_SR,30); intervalS.setMs(INTERNAL_SR,30);
+    decayS.setMs(INTERNAL_SR,25); damageS.setMs(INTERNAL_SR,30);
+    feedbackS.setMs(INTERNAL_SR,30); mixS.setMs(sr,25);
     reset();
   }
   void reset() override {
-    for (int k = 0; k < 3; ++k) {
-      left[k].clear(); right[k].clear();
-      lpL[k] = lpR[k] = heldL[k] = heldR[k] = 0.f;
-      holdCount[k] = 0;
+    for(int k=0;k<3;k++) {
+      delay[k].clear(); lpL[k]=lpR[k]=heldL[k]=heldR[k]=prevL[k]=prevR[k]=0.f;
+      heldCount[k]=0;
     }
-    timeS.y = map(0, NESTRIPLE_PARAMS[0].def);
-    intervalS.y = map(1, NESTRIPLE_PARAMS[1].def);
-    decayS.y = map(2, NESTRIPLE_PARAMS[2].def) * 0.01f;
-    degradeS.y = map(3, NESTRIPLE_PARAMS[3].def) * 0.01f;
-    feedbackS.y = map(5, NESTRIPLE_PARAMS[5].def) * 0.01f;
-    returnS.y = map(6, NESTRIPLE_PARAMS[6].def);
-    mixS.y = map(7, NESTRIPLE_PARAMS[7].def) * 0.01f;
-    for (auto& a : alphaS) a.y = filterAlpha(degradeS.y, (&a - alphaS) + 1);
-    lastL = lastR = shownFeedback = 0.f; shownOrder = 0;
+    phase=accL=accR=wetL=wetR=0.f; accCount=0;
+    timeS.y=map(0,BITROT_PARAMS[0].def); intervalS.y=1.f;
+    decayS.y=.6f; damageS.y=.2f; feedbackS.y=.2f; mixS.y=.35f;
+    displayOrder=0; displayFeedback=0;
   }
-  float filterAlpha(float degradation, int pass) const {
-    const float fc = 18000.f * powf(0.03f, degradation * pass / 3.f);
-    const float cutoff = clampf(fc, 100.f, sr * 0.42f);
-    const float a = 1.f - expf(-2.f * PI_F * cutoff / sr);
-    return 1.f - degradation * (1.f - a); // true passthrough at zero degradation
-  }
-  void process(const float* inL, const float* inR, float* oL, float* oR, int n,
-               const float* e, const Context&) override {
-    const float timeT = map(0, e[0]), intervalT = map(1, e[1]);
-    const float decayT = map(2, e[2]) * 0.01f, damageT = map(3, e[3]) * 0.01f;
-    const int order = (int)clampf(floorf(map(4, e[4]) + 0.5f), 0.f, 5.f);
-    const float fbT = map(5, e[5]) * 0.01f;
-    const float returnT = map(6, e[6]) >= 0.5f ? 1.f : 0.f;
-    const float mixT = map(7, e[7]) * 0.01f;
-    float alphaT[3];
-    for (int p = 0; p < 3; ++p) alphaT[p] = filterAlpha(damageT, p + 1);
-
-    for (int i = 0; i < n; ++i) {
-      const float inputL = inL[i], inputR = inR[i]; // safe when input/output alias
-      const float baseSamples = timeS.next(timeT) * sr * 0.001f;
-      const float ratio = intervalS.next(intervalT);
-      const float delay[3] = {baseSamples, baseSamples * ratio, baseSamples * ratio * ratio};
-      const float decay = decayS.next(decayT);
-      const float damage = degradeS.next(damageT);
-      const float fb = feedbackS.next(fbT), ret = returnS.next(returnT);
-      const float mix = mixS.next(mixT);
-      float stageL = inputL + lastL * fb * (1.f - ret);
-      float stageR = inputR + lastR * fb * (1.f - ret);
-      float wetL = 0.f, wetR = 0.f, level = 1.f, levelSum = 0.f;
-      for (int p = 0; p < 3; ++p) {
-        if (p == 1) { stageL += lastL * fb * ret; stageR += lastR * fb * ret; }
-        const int k = NESTRIPLE_ROUTES[order][p];
-        left[k].push(clampf(stageL, -2.f, 2.f));
-        right[k].push(clampf(stageR, -2.f, 2.f));
-        const float rawL = left[k].tap(delay[k]), rawR = right[k].tap(delay[k]);
-        const float a = alphaS[p].next(alphaT[p]);
-        lpL[k] = undenorm(lpL[k] + a * (rawL - lpL[k]));
-        lpR[k] = undenorm(lpR[k] + a * (rawR - lpR[k]));
-        const int bits = 16 - (int)(damage * (p + 1) * 4.f + 0.5f);
-        const float scale = (float)(1 << (bits - 1));
-        const float crushedL = damage < 0.001f ? lpL[k] : floorf(lpL[k] * scale + 0.5f) / scale;
-        const float crushedR = damage < 0.001f ? lpR[k] : floorf(lpR[k] * scale + 0.5f) / scale;
-        const int hold = 1 + (int)(damage * (p + 1) * 2.f + 0.5f);
-        if (holdCount[k] <= 0) {
-          heldL[k] = crushedL; heldR[k] = crushedR; holdCount[k] = hold - 1;
-        } else --holdCount[k];
-        stageL = heldL[k]; stageR = heldR[k];
-        wetL += stageL * level; wetR += stageR * level; levelSum += level;
-        level *= decay;
+  void slowTick(float inputL,float inputR,float time,float interval,float decay,float damage,
+                int algo,int ret,float feedback) {
+    const float t=timeS.next(time)*INTERNAL_SR*.001f;
+    const float ratio=intervalS.next(interval);
+    int tap[3] = {
+      (int)(t+.5f), (int)(t*ratio+.5f), (int)(t*ratio*ratio+.5f)
+    };
+    for(int k=0;k<3;k++) if(tap[k]>65534) tap[k]=65534; else if(tap[k]<1) tap[k]=1;
+    const float dec=decayS.next(decay);
+    const float dmg=damageS.next(damage);
+    const float fb=feedbackS.next(feedback);
+    float fL[3]={0}, fR[3]={0};
+    // Feedback always uses the previous slow-tick output, avoiding instantaneous algebraic loops.
+    switch(ret) {
+      case 0: fL[0]=prevL[2]*fb; fR[0]=prevR[2]*fb; break;              // WRAP C -> A
+      case 1: fL[1]=prevL[2]*fb; fR[1]=prevR[2]*fb; break;              // MIDDLE C -> B
+      case 2: fL[0]=fL[1]=prevL[2]*fb*.5f; fR[0]=fR[1]=prevR[2]*fb*.5f; break; // SPLIT
+      case 3: for(int k=0;k<3;k++){fL[k]=prevL[k]*fb;fR[k]=prevR[k]*fb;} break; // LOCAL
+      case 4: fL[0]=prevL[1]*fb; fL[1]=prevL[2]*fb;                     // CHAIN B -> A, C -> B
+              fR[0]=prevR[1]*fb; fR[1]=prevR[2]*fb; break;
+      default:fL[0]=prevL[2]*fb; fL[2]=prevL[0]*fb;                     // CROSS C <-> A
+              fR[0]=prevR[2]*fb; fR[2]=prevR[0]*fb; break;
+    }
+    float nowL[3]={0}, nowR[3]={0};
+    const BitrotRoute& graph=BITROT_ROUTES[algo];
+    for(int i=0;i<3;i++) {
+      const int k=graph.seq[i];
+      float xL=inputL*graph.dry[k]+fL[k];
+      float xR=inputR*graph.dry[k]+fR[k];
+      for(int j=0;j<3;j++) {
+        xL+=graph.link[k][j]*nowL[j];
+        xR+=graph.link[k][j]*nowR[j];
       }
-      lastL = undenorm(stageL); lastR = undenorm(stageR);
-      oL[i] = inputL * (1.f - mix) + wetL * (mix / levelSum);
-      oR[i] = inputR * (1.f - mix) + wetR * (mix / levelSum);
+      delay[k].push(clampf(xL,-2.f,2.f),clampf(xR,-2.f,2.f));
+      const float rawL=delay[k].tapL(tap[k]);
+      const float rawR=delay[k].tapR(tap[k]);
+      const float d=dmg*(k+1)*(1.f/3.f);
+      const float alpha=1.f-.82f*d;
+      lpL[k]=undenorm(lpL[k]+alpha*(rawL-lpL[k]));
+      lpR[k]=undenorm(lpR[k]+alpha*(rawR-lpR[k]));
+      const int bits=12-(int)(8.f*d+.5f);
+      const float scale=(float)(1 << (bits-1));
+      const float crushL=floorf(lpL[k]*scale+.5f)/scale;
+      const float crushR=floorf(lpR[k]*scale+.5f)/scale;
+      const int hold=1+(int)(9.f*d+.5f);
+      if(heldCount[k]<=0) {
+        heldL[k]=crushL; heldR[k]=crushR; heldCount[k]=hold-1;
+      } else --heldCount[k];
+      nowL[k]=heldL[k]; nowR[k]=heldR[k];
     }
-    shownOrder = order;
-    shownFeedback = feedbackS.y;
+    for(int k=0;k<3;k++){prevL[k]=undenorm(nowL[k]);prevR[k]=undenorm(nowR[k]);}
+    const float a=1.f/(1.f+dec+dec*dec);
+    wetL=(nowL[0]+dec*nowL[1]+dec*dec*nowL[2])*a;
+    wetR=(nowR[0]+dec*nowR[1]+dec*dec*nowR[2])*a;
+    displayFeedback=feedbackS.y;
   }
-  void meters(float* out) const override { out[0] = (float)shownOrder; out[1] = shownFeedback; }
+  void process(const float* inL,const float* inR,float* outL,float* outR,
+               int n,const float* e,const Context&) override {
+    const float t=map(0,e[0]), interval=map(1,e[1]);
+    const float dec=map(2,e[2])*.01f, dmg=map(3,e[3])*.01f;
+    const int algo=(int)clampf(floorf(map(4,e[4])+.5f),0.f,7.f);
+    const float feedback=map(5,e[5])*.01f;
+    const int ret=(int)clampf(floorf(map(6,e[6])+.5f),0.f,5.f);
+    const float mix=map(7,e[7])*.01f;
+    displayOrder=algo;
+    for(int i=0;i<n;i++){
+      const float l=inL[i],r=inR[i];
+      accL+=l;accR+=r;accCount++;
+      phase+=clockStep;
+      if(phase>=1.f){
+        phase-=1.f;
+        slowTick(accL/accCount,accR/accCount,t,interval,dec,dmg,algo,ret,feedback);
+        accL=accR=0.f;accCount=0;
+      }
+      const float m=mixS.next(mix);
+      outL[i]=l*(1.f-m)+wetL*m;
+      outR[i]=r*(1.f-m)+wetR*m;
+    }
+  }
+  void meters(float* out) const override {out[0]=(float)displayOrder;out[1]=displayFeedback;}
 };
-
 } // namespace rig

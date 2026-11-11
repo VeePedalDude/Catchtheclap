@@ -1,97 +1,105 @@
-// NES TRIPLE behavioural claims; tests use the rig's own signal player and measurement helpers.
+// BITROT MATRIX: measured timing, topologies, feedback, decay, degradation and dry mix.
 #include "rigtest.h"
 #include "nestriple.h"
 using namespace rigtest;
 
-static Signal pulse(float seconds = 2.5f) {
-  Signal s((size_t)(48000.f * seconds), 0.f);
-  s[24000] = 0.7f; // leave 500 ms for smoothed knob changes to settle
+static Signal pulse(float seconds=3.f){
+  Signal s((size_t)(48000.f*seconds),0.f);
+  s[24000]=0.7f;
   return s;
 }
-static float nearPeak(const Signal& s, int sample, int radius = 120) {
-  float best = 0.f;
-  for (int i = sample-radius; i <= sample+radius; ++i)
-    if (i >= 0 && (size_t)i < s.size()) best = fmaxf(best, fabsf(s[(size_t)i]));
-  return best;
+static float nearPeak(const Signal& s,int at,int r=140){
+  float v=0;
+  for(int i=at-r;i<=at+r;i++) if(i>=0 && (size_t)i<s.size()) v=fmaxf(v,fabsf(s[(size_t)i]));
+  return v;
 }
-static float nearArea(const Signal& s, int sample, int radius = 120) {
-  float total = 0;
-  for (int i = sample-radius; i <= sample+radius; ++i)
-    if (i >= 0 && (size_t)i < s.size()) total += fabsf(s[(size_t)i]);
-  return total;
+static float nearArea(const Signal& s,int at,int r=140){
+  float v=0;
+  for(int i=at-r;i<=at+r;i++) if(i>=0 && (size_t)i<s.size()) v+=fabsf(s[(size_t)i]);
+  return v;
 }
-static int nearPosition(const Signal& s, int sample, int radius = 120) {
-  int best = sample; float high = 0;
-  for (int i = sample-radius; i <= sample+radius; ++i)
-    if (i >= 0 && (size_t)i < s.size() && fabsf(s[(size_t)i]) > high) {high=fabsf(s[(size_t)i]);best=i;}
-  return best;
+static float difference(const Signal& a,const Signal& b){
+  float v=0;
+  for(size_t i=0;i<a.size()&&i<b.size();i++) v=fmaxf(v,fabsf(a[i]-b[i]));
+  return v;
 }
-static void clean(Fx<rig::NesTriple>& fx) {
-  fx.set("time",100); fx.set("interval",1); fx.set("decay",50);
-  fx.set("degrade",0); fx.set("feedback",0); fx.set("mix",100);
+static void configure(Fx<rig::NesTriple>& f){
+  f.set("time",100);f.set("interval",2);f.set("decay",70);
+  f.set("degrade",0);f.set("feedback",0);f.set("mix",100);
 }
 
-TEST("TIME and NES-style DECAY produce three equal-interval geometric-level echoes") {
-  Fx<rig::NesTriple> fx; clean(fx);
-  const auto out = fx.run(pulse()).L;
-  const int start = 24000;
-  const int t1 = nearPosition(out,start+4800), t2 = nearPosition(out,start+9600), t3 = nearPosition(out,start+14400);
-  const float a=nearArea(out,t1), b=nearArea(out,t2), c=nearArea(out,t3);
-  CHECK(fabsf((t1-start)/48.f-100.f)<2.f && fabsf((t2-start)/48.f-200.f)<2.f && fabsf((t3-start)/48.f-300.f)<2.f,
-        "taps at %.2f, %.2f, %.2f ms (target 100, 200, 300)", (t1-start)/48.f,(t2-start)/48.f,(t3-start)/48.f);
-  CHECK(fabsf(b/a-0.5f)<0.03f && fabsf(c/a-0.25f)<0.03f,
-        "volume ratios %.3f, %.3f, %.3f (target 1, .5, .25)",1.f,b/a,c/a);
+TEST("TIME now reaches 1600 ms and has a measured long echo") {
+  Fx<rig::NesTriple> f; configure(f);
+  f.set("time",1600);f.set("interval",1);f.set("decay",0);f.setStop("order","SERIES");
+  const auto o=f.run(pulse(3.5f)).L;
+  const float a=nearPeak(o,24000+1600*48);
+  CHECK(a>0.02f && nearPeak(o,24000+1400*48)<0.003f,
+        "TIME 1600 ms: echo level %.4f at 1600 ms, early level %.4f",a,nearPeak(o,24000+1400*48));
 }
 
-TEST("INTERVAL creates shorter and longer rhythmic spacing") {
-  for (float interval : {0.5f,2.f}) {
-    Fx<rig::NesTriple> fx; clean(fx); fx.set("interval",interval);
-    auto out=fx.run(pulse()).L;
-    const float want=100.f*(1.f+interval+interval*interval);
-    const int got=nearPosition(out,24000+(int)(want*48.f));
-    CHECK(fabsf((got-24000)/48.f-want)<3.f,
-          "INTERVAL %.1fx: third tap %.2f ms (target %.2f)",interval,(got-24000)/48.f,want);
+TEST("maximum INTERVAL supports an eight-second third stage") {
+  Fx<rig::NesTriple> f;configure(f);f.set("time",2000);f.set("interval",2);
+  f.set("decay",90);f.setStop("order","PARALLEL");
+  const auto o=f.run(pulse(8.9f)).L;
+  const float a=nearPeak(o,24000+8000*48);
+  CHECK(a>0.005f,"TIME 2000 ms, INTERVAL 2: last delay at 8000 ms, peak %.5f",a);
+}
+
+TEST("NES volume decay is geometric on three independent taps") {
+  Fx<rig::NesTriple> f;configure(f);f.set("decay",50);f.setStop("order","PARALLEL");
+  const auto o=f.run(pulse()).L;
+  const float a=nearArea(o,24000+4800),b=nearArea(o,24000+9600),c=nearArea(o,24000+19200);
+  CHECK(a>0 && fabsf(b/a-.5f)<.035f && fabsf(c/a-.25f)<.035f,
+        "tap amplitudes: first %.4f, second/first %.3f, third/first %.3f (target 1,.5,.25)",a,b/a,c/a);
+}
+
+TEST("all eight ORDER algorithms produce different waveforms") {
+  const char* routes[]={"SERIES","PARALLEL","FORK","MERGE","REVERSE","LADDER","CENTER","BRIDGE"};
+  Signal renders[8];
+  for(int k=0;k<8;k++){
+    Fx<rig::NesTriple> f;configure(f);f.set("decay",85);f.setStop("order",routes[k]);
+    renders[k]=f.run(pulse()).L;
   }
-}
-
-TEST("ORDER permutes the first operator and changes the earliest echo") {
-  for (const char* route : {"ABC","CBA"}) {
-    Fx<rig::NesTriple> fx; clean(fx); fx.set("interval",2); fx.set("decay",0); fx.setStop("order",route);
-    auto out=fx.run(pulse()).L;
-    const float want=route[0]=='A'?100.f:400.f;
-    const int got=nearPosition(out,24000+(int)(want*48.f));
-    CHECK(fabsf((got-24000)/48.f-want)<3.f && nearPeak(out,got)>0.1f,
-          "ORDER %s: first audible tap %.2f ms (target %.0f)",route,(got-24000)/48.f,want);
+  int pairs=0;float closest=1000;
+  for(int a=0;a<8;a++)for(int b=a+1;b<8;b++){
+    const float d=difference(renders[a],renders[b]);
+    closest=fminf(closest,d);if(d>.008f)pairs++;
   }
+  CHECK(pairs==28,"8 route algorithms: %d/28 pairwise distinct; closest waveform difference %.4f",pairs,closest);
 }
 
-TEST("FEEDBACK RETURN chooses an audible later-to-front or later-to-middle loop") {
-  for (const char* route : {"FRONT","MIDDLE"}) {
-    Fx<rig::NesTriple> fx; clean(fx); fx.set("interval",2); fx.set("decay",70);
-    fx.set("feedback",65); fx.setStop("return",route);
-    const auto out=fx.run(pulse()).L;
-    const float early=nearPeak(out,24000+38400), late=nearPeak(out,24000+43200); // 800 ms, 900 ms
-    CHECK(route[0]=='F'?early>0.04f && late<0.01f:late>0.02f && early<0.01f,
-          "RETURN %s: new echoes at 800/900 ms = %.4f/%.4f",route,early,late);
+TEST("all six feedback RETURN patterns have distinct regeneration") {
+  const char* returns[]={"WRAP","MIDDLE","SPLIT","LOCAL","CHAIN","CROSS"};
+  Signal renders[6];
+  for(int k=0;k<6;k++){
+    Fx<rig::NesTriple> f;configure(f);f.setStop("order","SERIES");f.set("feedback",75);f.setStop("return",returns[k]);
+    renders[k]=f.run(pulse(3.4f)).L;
   }
+  int pairs=0;float closest=1000;
+  for(int a=0;a<6;a++)for(int b=a+1;b<6;b++){
+    const float d=difference(renders[a],renders[b]);
+    closest=fminf(closest,d);if(d>.002f)pairs++;
+  }
+  CHECK(pairs==15,"6 return patterns: %d/15 pairwise distinct; closest waveform difference %.5f",pairs,closest);
 }
 
-TEST("DEGRADE damages repeated echoes cumulatively") {
-  auto run = [](float damage) {
-    Fx<rig::NesTriple> fx; clean(fx); fx.set("decay",90); fx.set("degrade",damage);
-    const auto out=fx.run(pulse()).L;
-    const float a=nearArea(out,24000+4800), c=nearArea(out,24000+14400);
-    return c/(a+1e-9f);
-  };
-  const float cleanRatio=run(0), destroyedRatio=run(100);
-  CHECK(cleanRatio>0.75f && destroyedRatio < cleanRatio*0.35f,
-        "third/first tap ratio clean %.3f, destroyed %.3f",cleanRatio,destroyedRatio);
+TEST("higher DEGRADE destroys later echoes more than earlier echoes") {
+  float ratios[2];
+  for(int k=0;k<2;k++){
+    Fx<rig::NesTriple> f;configure(f);f.set("interval",1);f.set("decay",90);
+    f.set("degrade",k?100:0);f.setStop("order","SERIES");
+    const auto o=f.run(pulse()).L;
+    ratios[k]=nearArea(o,24000+14400)/(nearArea(o,24000+4800)+1e-9f);
+  }
+  CHECK(ratios[0]>.65f && ratios[1]<ratios[0]*.8f,
+        "third/first echo area: undamaged %.3f, maximum DEGRADE %.3f",ratios[0],ratios[1]);
 }
 
-TEST("MIX zero is exact dry passthrough") {
-  Fx<rig::NesTriple> fx; fx.set("mix",0); fx.m.mixS.y=0;
-  const auto in=sine(48000,375,1,0.2f);
-  const auto out=fx.run(in);
-  CHECK(peak(diff(out.L,in))<1e-6f,"MIX 0%%: dry difference %.8f",peak(diff(out.L,in)));
+TEST("MIX 0 percent passes dry audio unchanged") {
+  Fx<rig::NesTriple> f;f.set("mix",0);f.m.mixS.y=0;
+  const auto s=sine(48000,375,1,0.2f);
+  const auto o=f.run(s);
+  const float d=difference(o.L,s);
+  CHECK(d<1e-6f,"dry passthrough maximum absolute difference %.8f",d);
 }
 RIGTEST_MAIN

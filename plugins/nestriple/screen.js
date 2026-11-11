@@ -1,35 +1,80 @@
-// FM-operator style routing map; shows the six ORDER permutations and the active feedback return.
-screen('nestriple', (c, b, m, h) => {
-  const routes = [[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
-  const names = ['A', 'B', 'C'];
-  const order = Math.max(0, Math.min(5, Math.round(h.eff(4) * 5)));
-  const back = h.eff(6) >= 0.5 ? 1 : 0;
-  const fb = Math.round(h.eff(5) * 80);
-  const w = b.w / 6.5, bh = b.h * .29;
-  const cy = b.y + b.h * .23, gap = (b.w - 3*w) / 4;
-  const xs = [b.x + gap, b.x + 2*gap+w, b.x+3*gap+2*w];
-  const yBottom = cy + bh;
+// BITROT MATRIX: FM-synth algorithm cards with real audio links and selectable regenerative loops.
+screen('nestriple', (c,b,m,h) => {
+  const names=['SERIES','PARALLEL','FORK','MERGE','REVERSE','LADDER','CENTER','BRIDGE'];
+  const returns=['WRAP','MIDDLE','SPLIT','LOCAL','CHAIN','CROSS'];
+  const order=Math.max(0,Math.min(7,Math.round(h.eff(4)*7)));
+  const ret=Math.max(0,Math.min(5,Math.round(h.eff(6)*5)));
+  const grids=[
+    [[.23,.43],[.50,.43],[.77,.43]], // A-B-C
+    [[.49,.19],[.49,.43],[.49,.67]], // independent A/B/C
+    [[.24,.43],[.74,.23],[.74,.63]], // A forks
+    [[.24,.23],[.24,.63],[.74,.43]], // merge
+    [[.77,.43],[.50,.43],[.23,.43]], // reverse C-B-A
+    [[.24,.43],[.50,.23],[.77,.43]], // ladder A -> B and C
+    [[.73,.23],[.24,.43],[.73,.63]], // center B forks
+    [[.24,.23],[.50,.23],[.73,.63]]  // bridge A->B->C, input at C
+  ];
+  const dry=[[0],[0,1,2],[0],[0,1],[2],[0],[1],[0,2]];
+  const links=[
+    [[0,1],[1,2]],[],[[0,1],[0,2]],[[0,2],[1,2]],
+    [[2,1],[1,0]],[[0,1],[0,2],[1,2]],[[1,0],[1,2]]
+  ];
+  const feedback=[
+    [[2,0]],[[2,1]],[[2,0],[2,1]],[[0,0],[1,1],[2,2]],
+    [[1,0],[2,1]],[[2,0],[0,2]]
+  ];
+  const w=b.w,hh=b.h,sz=Math.max(11,Math.min(w*.13,hh*.22));
+  const pts=grids[order].map(p=>({x:b.x+p[0]*w,y:b.y+p[1]*hh}));
+  const line=(x1,y1,x2,y2,color,opacity)=>{
+    c.strokeStyle=color;c.globalAlpha=opacity;c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();
+    const angle=Math.atan2(y2-y1,x2-x1);
+    const ar=Math.max(3,sz*.14);
+    c.beginPath();c.moveTo(x2,y2);
+    c.lineTo(x2-ar*Math.cos(angle-.55),y2-ar*Math.sin(angle-.55));
+    c.moveTo(x2,y2);c.lineTo(x2-ar*Math.cos(angle+.55),y2-ar*Math.sin(angle+.55));c.stroke();
+  };
   c.save();
-  c.lineWidth = Math.max(1, b.h * .015);
-  c.font = 'bold ' + Math.max(9, Math.min(16, b.h*.19)) + 'px monospace';
-  c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.strokeStyle = h.col.text; c.fillStyle = h.col.text;
-  for (let p=0;p<3;p++) {
-    c.globalAlpha=.9;
-    c.strokeRect(xs[p], cy, w, bh);
-    c.fillText(names[routes[order][p]], xs[p]+w/2,cy+bh/2);
-    if(p<2){
-      const x=xs[p]+w, nx=xs[p+1], midY=cy+bh/2;
-      c.beginPath();c.moveTo(x,midY);c.lineTo(nx,midY);c.stroke();
-      c.beginPath();c.moveTo(nx-5,midY-4);c.lineTo(nx,midY);c.lineTo(nx-5,midY+4);c.stroke();
-    }
+  c.lineWidth=Math.max(1,hh*.014);c.lineJoin='round';c.lineCap='round';
+  for(const [src,dst] of links[order]){
+    const p=pts[src],q=pts[dst];
+    const dx=q.x-p.x,dy=q.y-p.y,mag=Math.max(1,Math.hypot(dx,dy));
+    const off=sz*.62;
+    line(p.x+dx/mag*off,p.y+dy/mag*off,q.x-dx/mag*off,q.y-dy/mag*off,h.col.text,.70);
   }
-  c.strokeStyle=h.col.accent; c.fillStyle=h.col.accent;
-  c.globalAlpha=.9;
-  const bx=xs[2]+w/2, tx=xs[back]+w/2, by=b.y+b.h*.78;
-  c.beginPath();c.moveTo(bx,yBottom);c.lineTo(bx,by);c.lineTo(tx,by);c.lineTo(tx,yBottom+2);c.stroke();
-  c.beginPath();c.moveTo(tx-4,yBottom+7);c.lineTo(tx,yBottom+2);c.lineTo(tx+4,yBottom+7);c.stroke();
-  c.font=Math.max(8,Math.min(12,b.h*.12))+'px monospace';
-  c.textAlign='center'; c.fillText('FB '+fb+'%',(bx+tx)/2,by+Math.min(12,b.h*.12));
+  // Small input arrows show the parallel and bridge injection paths.
+  for(const k of dry[order]){
+    const p=pts[k];
+    line(p.x-sz*.91,p.y,p.x-sz*.58,p.y,h.col.text,.48);
+  }
+  // Regenerative arrows use the skin accent and return to the selected operators.
+  feedback[ret].forEach(([src,dst],i)=>{
+    const p=pts[src],q=pts[dst];
+    const sx=p.x,sy=p.y+sz*.57,ex=q.x,ey=q.y+sz*.57;
+    const curveY=b.y+hh*(.76+i*.035);
+    c.strokeStyle=h.col.accent;c.globalAlpha=.85;c.setLineDash([Math.max(2,sz*.18),Math.max(2,sz*.1)]);
+    c.beginPath();c.moveTo(sx,sy);
+    if(src===dst){
+      c.bezierCurveTo(sx+sz*.7,curveY,sx-sz*.7,curveY,ex,ey);
+    }else{
+      c.bezierCurveTo(sx,curveY,ex,curveY,ex,ey);
+    }
+    c.stroke();c.setLineDash([]);
+    const pointUp=sz*.24;
+    c.beginPath();c.moveTo(ex-pointUp*.65,ey+pointUp);
+    c.lineTo(ex,ey);c.lineTo(ex+pointUp*.65,ey+pointUp);c.stroke();
+  });
+  c.font='bold '+Math.max(9,Math.min(16,sz*.6))+'px monospace';
+  c.textBaseline='middle';c.textAlign='center';
+  pts.forEach((p,i)=>{
+    c.globalAlpha=.96;c.fillStyle=h.col.text;
+    c.strokeStyle=h.col.text;
+    c.fillRect(p.x-sz*.5,p.y-sz*.5,sz,sz);
+    c.fillStyle=h.col.accent;c.fillText('ABC'[i],p.x,p.y+sz*.035);
+  });
+  c.globalAlpha=.92;c.fillStyle=h.col.text;
+  c.font='bold '+Math.max(9,Math.min(13,hh*.115))+'px monospace';
+  c.textAlign='left';c.fillText(names[order],b.x+7,b.y+hh*.88);
+  c.textAlign='right';c.fillStyle=h.col.accent;
+  c.fillText(returns[ret]+' '+Math.round(h.eff(5)*80)+'%',b.x+w-7,b.y+hh*.88);
   c.restore();
 });
