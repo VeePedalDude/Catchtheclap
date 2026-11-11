@@ -17,7 +17,7 @@ jobs:
           python-version: '3.12'
       - name: zig (builds all three targets)
         run: pip install ziglang==0.17.0
-      - name: the checker checks itself
+      - name: diagnose NES TRIPLE\n        run: python3 tools/check.py plugins/nestriple --fast --quick\n      - name: the checker checks itself
         run: python3 tests/selftest.py
       - name: build and check every plugin
         run: python3 tools/check.py --all
