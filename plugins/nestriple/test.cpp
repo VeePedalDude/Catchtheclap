@@ -92,6 +92,6 @@ TEST("MIX zero is exact dry passthrough") {
   Fx<rig::NesTriple> fx; fx.set("mix",0); fx.m.mixS.y=0;
   const auto in=sine(48000,375,1,0.2f);
   const auto out=fx.run(in);
-  CHECK(diff(out.L,in)<1e-6f,"MIX 0%%: dry difference %.8f",diff(out.L,in));
+  CHECK(peak(diff(out.L,in))<1e-6f,"MIX 0%%: dry difference %.8f",peak(diff(out.L,in)));
 }
 RIGTEST_MAIN
