@@ -1,0 +1,8 @@
+{
+  "struct": "rig::DiSentinel",
+  "kind": "effect",
+  "category": "utility",
+  "tags": ["di", "input", "noise-gate", "expander", "noise-floor", "highpass", "lowpass"],
+  "author": "KC",
+  "version": "1.0.0"
+}
