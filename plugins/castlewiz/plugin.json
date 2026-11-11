@@ -1,0 +1,8 @@
+{
+  "struct": "rig::CastleAlmostWizard",
+  "kind": "effect",
+  "category": "experimental",
+  "tags": ["modular", "patchable", "multifx", "glitch", "granular"],
+  "author": "KC",
+  "version": "1.0.0"
+}
