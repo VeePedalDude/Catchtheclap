@@ -29,7 +29,8 @@ AGENTS.md is the contract (API, rules, helpers, limits). Read it before writing 
    - `undenorm()` in feedback paths.
    - Times and frequencies from `sr`.
    - Read the inputs before writing the outputs.
-5. **Loop: keep or revert.** After each single change, run `python3 tools/check.py plugins/<id> --fast`.
+5. **Loop: keep or revert** (AGENTS.md rules 5-9 keep it short). After each single change, run
+   `python3 tools/check.py plugins/<id> --fast --quick` (about 2.5 s), and `--fast` once before the final build.
    - Keep the change if everything passes and the numbers moved the way you meant.
    - Revert it otherwise.
    - When a check fails, find the cause before changing anything: rigcheck's message names the

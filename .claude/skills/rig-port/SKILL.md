@@ -48,7 +48,8 @@ it matches the original.
    - Bit-identical is the best case. Otherwise report the difference in dB and explain it: float vs
      fixed point, the sample rate, a changed smoother.
    - Without a runnable original, test the claims the original's comments or docs make.
-5. **Check and loop** with `python3 tools/check.py plugins/<id> --fast`, as in the rig-effect skill.
+5. **Check and loop** with `python3 tools/check.py plugins/<id> --fast --quick`, as in the rig-effect skill
+   (AGENTS.md rules 5-9).
    Ported code often fails three checks:
    - **clicks:** add smoothing;
    - **instances:** move statics into members;

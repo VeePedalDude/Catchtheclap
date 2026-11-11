@@ -29,7 +29,8 @@ AGENTS.md sections 3 and 6 first. Then:
    - Use `c.bpm` for tempo sync and `c.in` (this block's dry guitar) for playing-driven sources.
    - Use a member generator for randomness, never `rand()`.
    - Settings, tables, taps and `ext()` aren't available to plugins.
-5. **Loop: keep or revert** with `python3 tools/check.py plugins/<id> --fast` after each change. For a
+5. **Loop: keep or revert** with `python3 tools/check.py plugins/<id> --fast --quick` after each change
+   (AGENTS.md rules 5-9), and `--fast` once before the final build. For a
    source, rigcheck's clicks check is the output's largest jump per block when a knob jumps.
 6. **Finish** with `python3 tools/check.py plugins/<id>`, for all targets, ending in PASSED. Report as
    AGENTS.md section 9 says. `--render` writes the value as a control track you can plot.

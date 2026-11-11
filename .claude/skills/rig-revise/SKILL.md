@@ -23,7 +23,8 @@ the same unless the change is the point.
    - It must say bit-identical, unless the change is meant to alter the sound.
    - If it is meant to, report by how much (the dB it prints) and where (the first frame it differs).
 4. **Test the change.** Add a `TEST` to `plugins/<id>/test.cpp` for the new behaviour, then run
-   `python3 tools/check.py plugins/<id> --fast` until it passes. Keep the old tests passing.
+   `python3 tools/check.py plugins/<id> --fast --quick` until it passes (AGENTS.md rules 5-9). Keep the old
+   tests passing.
 5. **Bump `version`** in `plugin.json`: patch for a fix, minor for a new knob.
 6. **Finish** with the full `python3 tools/check.py plugins/<id>` and report:
    - what changed;

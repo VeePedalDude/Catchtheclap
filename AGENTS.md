@@ -55,6 +55,58 @@ build.
 **Report verified and inferred separately.** "Measured: the echo is 375 ms ± 1 sample" is verified.
 "Should sound warm" is inferred. Flag anything you couldn't fix.
 
+### Working fast
+
+Rules 1–4 keep the work right; these keep it short.
+
+5. **Start from green, never from blank.**
+   - `new_plugin.py` makes a plugin that already passes every check. Change it one step at a time and
+     you're never more than one change from green.
+   - Copy, don't recall. The knob table, smoothing and `test.cpp` patterns are in the template and in
+     `plugins/trem` and `plugins/rand`. Copying them is faster than writing them from memory, and they
+     are already right.
+   - Use a helper before you write DSP. `OnePole`, `Svf`, `Biquad`, `DelayLine`, `Allpass` and
+     `vaSat` are tested, allocation-free and correct at every sample rate.
+   - Read this file once. Open a rig header only when you're about to use what's in it.
+
+6. **Run the quickest check that answers your question.**
+
+   | When | Command | Time |
+   |---|---|---|
+   | each change | `check.py plugins/<id> --fast --quick` | about 2.5 s |
+   | before the final build | `check.py plugins/<id> --fast` (all 27 knob settings, and CPU) | about 3 s |
+   | once, at the end | `check.py plugins/<id>` (all three targets) | about 15 s; minutes the first time |
+
+   - To look at one failure, reproduce that case alone. The FAIL line names the input and the knob
+     setting; `--render --set knob=value` plays it in a second. Don't rerun everything to see it again.
+   - Don't run the full build to find a compile error: `--fast` shows the same error in seconds.
+
+7. **Read the failure, then change one thing.**
+   - Every FAIL line carries the evidence: the signal, the knob setting, and how far off it was. Fix
+     the cause it points to, not the nearest constant.
+   - Three failed fixes for the same check mean the approach is wrong, not the numbers. Stop tuning.
+     Bisect (take out half of `process()` until the check passes), or change the structure.
+   - Never loosen a test, or work around a rigcheck FAIL, to get to PASSED. A WARN you leave needs one
+     sentence saying why it's acceptable.
+
+8. **Tests prove claims, nothing more.**
+   - Write one `TEST` per claim the player would care about, and set its target number before you write
+     the DSP. Stop tuning when the number is met; "sounds better" isn't a target.
+   - Don't re-test what rigcheck already checks: NaN, clicks, allocation, shared state, sample rates,
+     block sizes and CPU.
+   - Copy every number in your report from the tools' output. Never estimate or recompute one.
+
+9. **Done is done.** Stop when:
+   - the full `check.py` ends in PASSED;
+   - `test.cpp` covers every claim;
+   - the report is written.
+
+   Write no README and no extra files. Add no knobs nobody asked for. Make no edits to the rig's
+   files. Don't do a second pass "to polish".
+
+**The test:** every command you ran answered a question you had, and every line you wrote traces to
+the request.
+
 ## 1. An effect
 
 Your header includes `"module.h"` (the build puts `engine/core/` on the include path). It defines one
