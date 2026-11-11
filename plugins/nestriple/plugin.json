@@ -1,0 +1,8 @@
+{
+  "struct": "rig::NesTriple",
+  "kind": "effect",
+  "category": "delay",
+  "tags": ["nes", "lofi", "multi-tap", "feedback", "digital"],
+  "author": "KC",
+  "version": "1.0.0"
+}
