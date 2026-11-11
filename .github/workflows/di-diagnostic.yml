@@ -1,0 +1,13 @@
+name: diagnostic-di-sentinel
+on:
+  push:
+    branches: [debug/di-sentinel-check]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run full fast check with verbose output
+        run: python3 tools/check.py plugins/disentinel --fast --quick
