@@ -1,0 +1,8 @@
+{
+  "struct": "rig::Clockwitch8950",
+  "kind": "effect",
+  "category": "pitch",
+  "tags": ["8bit", "voice", "pitch", "clock", "vibrato", "glitch"],
+  "author": "KC",
+  "version": "1.0.0"
+}
