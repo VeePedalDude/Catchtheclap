@@ -1,0 +1,8 @@
+{
+  "struct": "rig::NesTriple",
+  "kind": "effect",
+  "category": "delay",
+  "tags": ["8-bit", "digital", "network", "degradation", "chiptune"],
+  "author": "KC",
+  "version": "2.0.0"
+}
