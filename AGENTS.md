@@ -89,9 +89,11 @@ Rules 1–4 keep the work right; these keep it short.
    - Never loosen a test, or work around a rigcheck FAIL, to get to PASSED. A WARN you leave needs one
      sentence saying why it's acceptable.
 
-8. **Tests prove claims, nothing more.**
+8. **Tests prove meaningful claims, not merely numerical differences.**
    - Write one `TEST` per claim the player would care about, and set its target number before you write
      the DSP. Stop tuning when the number is met; "sounds better" isn't a target.
+   - For selectable modes, test the intended functional or audible difference using a stated input,
+     metric and threshold. Two outputs differing by a few bits does not establish a useful mode.
    - Don't re-test what rigcheck already checks: NaN, clicks, allocation, shared state, sample rates,
      block sizes and CPU.
    - Copy every number in your report from the tools' output. Never estimate or recompute one.
@@ -103,6 +105,56 @@ Rules 1–4 keep the work right; these keep it short.
 
    Write no README and no extra files. Add no knobs nobody asked for. Make no edits to the rig's
    files. Don't do a second pass "to polish".
+
+### Production efficiency
+
+10. **Validate the architecture before detailed DSP.** Define the signal path, stage order,
+    feedback destinations and gains, and each control's effect. For multi-mode plugins, first
+    prototype the routing with simple signals before adding coloration or UI. Confirm the graph
+    matches the requested behavior before committing to the full implementation.
+
+11. **Prove selectable modes are meaningfully different.** Give each algorithm or mode a distinct
+    purpose and a testable signature (for example, tap times, response, topology, spectral balance or
+    regeneration). Set a meaningful difference threshold in advance; tiny sample differences are
+    insufficient. Remove or rethink redundant modes instead of adding more labels.
+
+12. **Compile tests before an expensive build.** Catch test harness/API mistakes before a
+    cross-platform build. Compile `test.cpp` on its own when a supported test-only command is
+    available; otherwise use `check.py plugins/<id> --fast --quick` to compile the plugin and its
+    tests. Don't start the full build until the targeted compile and tests are green.
+
+13. **Check only the affected plugin while iterating.** After a single change, run the smallest
+    relevant check for `plugins/<id>`. Preserve the previous passing result for comparison.
+    Run the repository-wide suite once for release integration, not after each plugin edit.
+
+14. **Make failures self-explanatory.** Read the failing command, compiler error, failed assertion
+    and measured value from the existing output before changing code. CI should surface that evidence
+    directly. If it does not, improve diagnostics as a separate tooling change rather than adding
+    temporary debugging commits to the plugin or workflow.
+
+15. **Set a performance budget before implementation.** Specify CPU cost, memory per instance,
+    latency and output headroom appropriate to the effect. Measure each on the actual build; compare
+    results with the budget and the previous passing version. Do not call an optimization successful
+    based on source code alone.
+
+16. **Use only the fidelity the effect needs.** For deliberately degraded effects, select the
+    internal sample rate, interpolation, precision, filtering and update cadence before writing
+    expensive processing. Prefer cheap methods when their artifacts serve the requested sound, but
+    prove the sonic behavior and CPU benefit rather than assuming lower fidelity is faster.
+
+17. **Avoid duplicate CI work.** Prefer one authoritative validation run per commit; where the
+    workflow supports it, cancel superseded runs and avoid running identical push and pull-request
+    checks for the same SHA. Do not create new commits solely to repeat an unchanged successful test.
+
+18. **Validate custom displays separately from audio.** Check JavaScript syntax, parameter indices,
+    routing labels and meter mappings, then inspect the actual rendering in the rig's preview.
+    Display tests are separate from DSP tests. If visual inspection is unavailable, report that
+    limitation instead of claiming the screen was verified.
+
+19. **Freeze a proven implementation.** Deliver when the full three-target build passes, the
+    requested behavior and mode differences have supporting tests, the performance budget is met
+    and warnings are explained. Provide the artifact and measured report. Stop; make no speculative
+    controls, cosmetic passes or unrelated changes.
 
 **The test:** every command you ran answered a question you had, and every line you wrote traces to
 the request.
