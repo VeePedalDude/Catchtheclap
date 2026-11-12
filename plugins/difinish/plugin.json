@@ -1,0 +1,8 @@
+{
+  "struct": "rig::DiFinisher",
+  "kind": "effect",
+  "category": "utility",
+  "tags": ["guitar", "mastering", "eq", "compressor", "limiter", "output"],
+  "author": "KC",
+  "version": "1.0.0"
+}
