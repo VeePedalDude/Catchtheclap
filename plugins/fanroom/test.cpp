@@ -97,4 +97,40 @@ TEST("The two display meters remain meaningful and bounded") {
   CHECK(gMin>=0&&gMax<=1&&gMax-gMin>.6f&&pMin<-.7f&&pMax>.7f,
         "blade gain %.2f..%.2f and oscillation pan %.2f..%.2f",gMin,gMax,pMin,pMax);
 }
+
+TEST("COLOR zero retains the original delay path when CHOP and movement are off") {
+  Fx<FanRoom> f;setup(f);f.set("chop",0);f.set("color",0);
+  const Signal x=sine(48000,375,2),y=f.run(x).L;
+  float difference=0.f;
+  for(size_t i=48000;i<x.size();i++)
+    difference=fmaxf(difference,fabsf(y[i]-x[i-575]));
+  CHECK(difference<.00005f,"COLOR 0 baseline: worst sample error %.7f from nominal 12 ms delay",difference);
+}
+TEST("COLOR creates moving comb cancellations with CHOP disabled") {
+  Fx<FanRoom> plain,interfering;setup(plain);setup(interfering);
+  plain.set("chop",0);interfering.set("chop",0);interfering.set("color",100);
+  const Signal x=sine(48000,750,3);
+  const Signal a=envelope(plain.run(x).L,128),b=envelope(interfering.run(x).L,128);
+  float alo=10.f,ahi=0.f,blo=10.f,bhi=0.f;
+  for(size_t i=200;i<a.size();i++){
+    alo=fminf(alo,a[i]);ahi=fmaxf(ahi,a[i]);
+    blo=fminf(blo,b[i]);bhi=fmaxf(bhi,b[i]);
+  }
+  const float dryRatio=ahi/(alo+1e-8f),scatterRatio=bhi/(blo+1e-8f);
+  CHECK(dryRatio<1.05f && scatterRatio>2.f,
+        "CHOP 0: COLOR 0 ratio %.3fx, moving interference ratio %.3fx",dryRatio,scatterRatio);
+}
+TEST("COLOR interference moves at blade-pass rate without volume tremolo") {
+  Fx<FanRoom> f;setup(f);f.set("chop",0);f.set("color",100);
+  const auto o=f.run(sine(48000,750,3));
+  const Signal env=envelope(o.L,128),tail(env.begin()+200,env.end());
+  const float hz=movementHz(tail,48000.f/128.f,18,48);
+  CHECK(fabsf(hz-12.f)<.7f,"COLOR-only movement %.2f Hz for 4 Hz rotor x 3 blades",hz);
+}
+TEST("Air turbulence produces no independent hiss with silent input") {
+  Fx<FanRoom> f;setup(f);f.set("color",100);f.set("chop",0);
+  const auto y=f.run(constant(48000,2,0)).L;
+  const float p=peak(y);
+  CHECK(p<1e-7f,"full COLOR silent input gives peak %.9f",p);
+}
 RIGTEST_MAIN

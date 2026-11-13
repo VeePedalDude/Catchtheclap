@@ -1,4 +1,4 @@
-// FAN ROOM: blade-pass guitar tremolo, rotating spectral shadows and oscillating Doppler.
+// FAN ROOM: blade-pass tremolo, rotating acoustic interference, turbulent air and oscillating Doppler.
 // ROTOR 0.8-16 Hz (default 4), BLADES 2-6 (3), CHOP 0-100% (75), COLOR 0-100% (45),
 // SWING 0.08-2.0 Hz (0.35), ARC 0-100% (65), DOPPLER 0-100% (40), MIX 0-100% (80).
 #pragma once
@@ -26,6 +26,9 @@ struct FanRoom : Module {
   DelayLine<8192> pathL, pathR;
   OnePole rotorS, chopS, colorS, swingS, arcS, dopplerS, mixS;
   float bladePhase=0.f, swingPhase=0.f, airL=0.f, airR=0.f;
+  float noiseFast=0.f, noiseSlow=0.f, inputEnv=0.f;
+  float noiseFastA=.3f, noiseSlowA=.03f, envAttackA=.001f, envReleaseA=.0002f;
+  unsigned noiseState=0xA53E419Du;
   float gain=1.f, pan=0.f;
   int bladeCount=3;
   const ModuleDesc& desc() const override { return FANROOM_DESC; }
@@ -33,11 +36,16 @@ struct FanRoom : Module {
     sr=s;
     rotorS.setMs(sr,30); chopS.setMs(sr,25); colorS.setMs(sr,25);
     swingS.setMs(sr,100); arcS.setMs(sr,30); dopplerS.setMs(sr,30);
+    noiseFastA=clampf(2.f*PI_F*2800.f/sr,.001f,1.f);
+    noiseSlowA=clampf(2.f*PI_F*280.f/sr,.001f,1.f);
+    envAttackA=1.f-expf(-1.f/(.012f*sr));
+    envReleaseA=1.f-expf(-1.f/(.090f*sr));
     mixS.setMs(sr,25); reset();
   }
   void reset() override {
     pathL.clear(); pathR.clear();
     bladePhase=swingPhase=airL=airR=pan=0.f; gain=1.f;
+    noiseFast=noiseSlow=inputEnv=0.f;noiseState=0xA53E419Du;
     rotorS.y=map(0,FANROOM_PARAMS[0].def);
     chopS.y=.75f; colorS.y=.45f;
     swingS.y=map(4,FANROOM_PARAMS[4].def);
@@ -80,8 +88,36 @@ struct FanRoom : Module {
       const float filteredL=movedL+shade*(airL-movedL);
       const float filteredR=movedR+shade*(airR-movedR);
       const float side=arc*head;
-      const float wetL=filteredL*trem*(1.f-.5f*side);
-      const float wetR=filteredR*trem*(1.f+.5f*side);
+      float acoustL=filteredL, acoustR=filteredR;
+      // COLOR 0 retains the original tremolo and moving spectral shadows.
+      // Each blade moves a scattered acoustic path by 0.3..1.15 ms,
+      // sweeping comb cancellations through the guitar harmonics.
+      if(color>.00001f){
+        const float angle=2.f*PI_F*bladePhase*(float)bladeCount;
+        const float lagSec=.00030f+.00085f*(.5f+.5f*sinf(angle+.35f));
+        const float scatterL=pathL.tap(clampf(tap+lagSec*sr,1.f,8190.f));
+        const float scatterR=pathR.tap(clampf(tap+(lagSec+.000085f)*sr,1.f,8190.f));
+        const float combL=(filteredL+.88f*scatterL)*(1.f/1.88f);
+        const float combR=(filteredR+.88f*scatterR)*(1.f/1.88f);
+        const float scatterAmount=color*(.56f+.40f*shadow);
+        acoustL+=scatterAmount*(combL-filteredL);
+        acoustR+=scatterAmount*(combR-filteredR);
+        // Deterministic, band-limited air turbulence scales with guitar energy.
+        // It emits no separate noise when the guitar is silent.
+        noiseState^=noiseState<<13;noiseState^=noiseState>>17;noiseState^=noiseState<<5;
+        const float noise=(float)(noiseState>>8)*(1.f/8388608.f)-1.f;
+        noiseFast=undenorm(noiseFast+noiseFastA*(noise-noiseFast));
+        noiseSlow=undenorm(noiseSlow+noiseSlowA*(noiseFast-noiseSlow));
+        const float targetEnv=.5f*(fabsf(movedL)+fabsf(movedR));
+        const float envA=targetEnv>inputEnv?envAttackA:envReleaseA;
+        inputEnv=undenorm(inputEnv+envA*(targetEnv-inputEnv));
+        const float turbulence=.36f*color*color*inputEnv*(.22f+.78f*shadow)*(noiseFast-noiseSlow);
+        acoustL+=turbulence*(1.f-.15f*side);
+        acoustR+=turbulence*(1.f+.15f*side);
+      }
+      // The head's slow Doppler and stereo swing stay independent.
+      const float wetL=acoustL*trem*(1.f-.5f*side);
+      const float wetR=acoustR*trem*(1.f+.5f*side);
       outL[i]=clampf(l*(1.f-mix)+wetL*mix,-4.f,4.f);
       outR[i]=clampf(r*(1.f-mix)+wetR*mix,-4.f,4.f);
       gain=trem;pan=side;
