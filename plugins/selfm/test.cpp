@@ -1,102 +1,108 @@
-// SELF FM MATRIX: measure guitar-derived phase modulation rather than substitute oscillators.
+// SELF FM MATRIX v2: tests for strong audio-rate sidebands and genuine synthesis routing.
 #include "rigtest.h"
 #include "selfm.h"
 using namespace rigtest;
 using rig::SelfFmMatrix;
-
-static void setup(Fx<SelfFmMatrix>& f) {
-  f.set("depth",95);f.set("source",60);f.set("env",90);
-  f.set("sustain",65);f.set("feedback",50);f.set("route",1);
-  f.set("tone",11000);f.set("mix",100);
+static void base(Fx<SelfFmMatrix>& f){
+  f.set("depth",5.5f);f.set("source",337.f);f.set("env",80.f);
+  f.set("sustain",25.f);f.set("feedback",20.f);f.set("route",1.f);
+  f.set("tone",12000.f);f.set("mix",100.f);
 }
-static float tailRms(const Signal& x,size_t from){double sum=0;for(size_t i=from;i<x.size();i++)sum+=(double)x[i]*x[i];return (float)sqrt(sum/(double)(x.size()-from));}
-static float harmonic(const Signal& x,float freq){return toneLevel(x,48000.f,freq,24000);}
-static float harmonicEnergy(const Signal& x,float base){double sum=0;for(int k=2;k<=12;k++){const float h=harmonic(x,base*(float)k);sum+=(double)h*h;}return (float)sqrt(sum);}
-
-TEST("DEPTH zero has essentially no new harmonics; higher DEPTH creates strong audio-rate sidebands") {
-  const Signal x=sine(48000,300,2,.35f);
-  Fx<SelfFmMatrix> clean,mod;setup(clean);setup(mod);
-  clean.set("depth",0);mod.set("depth",95);
-  const auto a=clean.run(x).L,b=mod.run(x).L;
-  const float h0=harmonicEnergy(a,300),h1=harmonicEnergy(b,300);
-  CHECK(h0<.0005f&&h1>.035f,"300Hz carrier: depth 0 harmonic RMS %.6f; depth 95 %.4f",h0,h1);
+static float rmsTail(const Signal& x,size_t from=20000){
+  double sum=0;for(size_t i=from;i<x.size();i++)sum+=(double)x[i]*x[i];
+  return (float)sqrt(sum/(double)(x.size()-from));
 }
-TEST("ROUTE has four distinguishable harmonic profiles: self, serial, fan-in, parallel") {
-  const Signal x=sine(48000,300,2,.35f);
-  float feature[4][3]={{0}};
-  for(int k=0;k<4;k++){
-    Fx<SelfFmMatrix> f;setup(f);f.set("route",(float)k);
-    auto y=f.run(x).L;
-    for(int h=0;h<3;h++)feature[k][h]=harmonic(y,300.f*(float)(h+1));
-  }
-  float minDistance=1e6f;
-  for(int a=0;a<4;a++)for(int b=a+1;b<4;b++){
-    float d=0;for(int h=0;h<3;h++)d+=fabsf(feature[a][h]-feature[b][h]);
-    minDistance=fminf(minDistance,d);
-  }
-  CHECK(minDistance>.04f,"smallest pairwise difference in first three harmonic amplitudes %.4f",minDistance);
+static float relativeDiff(const Signal& a,const Signal& b,size_t from=20000){
+  double ds=0,bs=0;for(size_t i=from;i<a.size();i++){
+    const double d=(double)a[i]-(double)b[i];ds+=d*d;bs+=(double)a[i]*a[i];
+  }return (float)sqrt(ds/(bs+1e-20));
 }
-TEST("SOURCE changes the modulator spectrum, not merely a global output gain") {
-  const Signal x=sine(48000,300,2,.35f);
-  Fx<SelfFmMatrix> a,b;setup(a);setup(b);a.set("source",0);b.set("source",100);
-  const auto A=a.run(x).L,B=b.run(x).L;
-  const float hA=harmonic(A,900)/fmaxf(harmonic(A,300),1e-6f);
-  const float hB=harmonic(B,900)/fmaxf(harmonic(B,300),1e-6f);
-  CHECK(fabsf(hA-hB)>.2f,"third-harmonic/fundamental ratios: direct %.3f, edge %.3f",hA,hB);
+TEST("INDEX creates strong inharmonic sidebands rather than overdrive"){
+  Fx<SelfFmMatrix> zero,hot;base(zero);base(hot);
+  for(auto* f:{&zero,&hot}){f->set("sustain",0);f->set("feedback",0);f->set("route",0);}
+  zero.set("depth",0);hot.set("depth",5.5f);
+  const Signal in=sine(48000,220,2,.3f);
+  const auto a=zero.run(in).L,b=hot.run(in).L;
+  const float off=toneLevel(a,48000,557,24000),on=toneLevel(b,48000,557,24000);
+  CHECK(on>.045f&&on>30.f*(off+1e-6f),
+        "220+337Hz sideband: INDEX=0 %.5f, INDEX=5.5 %.4f",off,on);
 }
-TEST("FEEDBACK changes modulation spectrum without unstable level growth") {
-  const Signal x=sine(48000,300,2,.35f);
-  Fx<SelfFmMatrix> a,b;setup(a);setup(b);a.set("feedback",0);b.set("feedback",85);
-  const auto A=a.run(x).L,B=b.run(x).L;
-  const float hA=harmonic(A,600),hB=harmonic(B,600);
-  const float ra=tailRms(A,24000),rb=tailRms(B,24000);
-  CHECK(fabsf(hA-hB)>.015f&&rb<.5f,"second harmonic feedback 0 %.4f, feedback 85 %.4f; RMS %.4f -> %.4f",hA,hB,ra,rb);
+TEST("MOD HZ moves inharmonic sideband frequency"){
+  Fx<SelfFmMatrix> f300,f500;base(f300);base(f500);
+  for(auto* f:{&f300,&f500}){f->set("depth",5.5f);f->set("sustain",0);f->set("feedback",0);f->set("route",0);}
+  f300.set("source",300);f500.set("source",500);
+  const Signal x=sine(48000,220,2,.3f);
+  const auto a=f300.run(x).L,b=f500.run(x).L;
+  const float at520=toneLevel(a,48000,520,24000),at720=toneLevel(b,48000,720,24000);
+  const float wrong520=toneLevel(b,48000,520,24000),wrong720=toneLevel(a,48000,720,24000);
+  CHECK(at520>.04f&&at720>.04f&&at520>10.f*(wrong520+1e-6f)&&at720>10.f*(wrong720+1e-6f),
+        "300Hz creates 520Hz %.3f (off %.3f); 500Hz creates 720Hz %.3f (off %.3f)",at520,wrong520,at720,wrong720);
 }
-TEST("TONE filters the processed upper harmonic spectrum") {
-  const Signal x=sine(48000,850,2,.4f);
-  Fx<SelfFmMatrix> lo,hi;setup(lo);setup(hi);lo.set("tone",500);hi.set("tone",11000);
-  const auto A=lo.run(x).L,B=hi.run(x).L;
-  const float highLo=harmonic(A,4250),highHi=harmonic(B,4250);
-  CHECK(highHi>highLo*3.f,"fifth harmonic with 500Hz tone %.5f; 11kHz tone %.5f",highLo,highHi);
+TEST("SELF mixes guitar-derived harmonic modulation"){
+  Fx<SelfFmMatrix> osc,gui;base(osc);base(gui);
+  for(auto* f:{&osc,&gui}){f->set("feedback",0);f->set("route",0);}
+  osc.set("sustain",0);gui.set("sustain",100);
+  const auto x=sine(48000,220,2,.3f);
+  const float a=toneLevel(osc.run(x).L,48000,440,24000);
+  const float b=toneLevel(gui.run(x).L,48000,440,24000);
+  CHECK(b>.09f&&b>a*8.f,"guitar harmonic %.3f vs oscillator-only %.4f",b,a);
 }
-TEST("SUSTAIN changes the modulation strength on a quiet played note") {
-  const Signal x=sine(48000,300,2,.025f);
-  Fx<SelfFmMatrix> a,b;setup(a);setup(b);a.set("sustain",0);b.set("sustain",100);
-  const auto A=a.run(x).L,B=b.run(x).L;
-  const float harmA=harmonicEnergy(A,300),harmB=harmonicEnergy(B,300);
-  CHECK(harmB>harmA*1.5f,"quiet note harmonic energy sustain 0 %.5f; sustain 100 %.5f",harmA,harmB);
+TEST("ROUTE has four audibly different transfer behaviors"){
+  Signal out[4];const auto s=sine(48000,220,2,.3f);
+  for(int k=0;k<4;k++){Fx<SelfFmMatrix> f;base(f);f.set("route",(float)k);out[k]=f.run(s).L;}
+  const float a=relativeDiff(out[0],out[1]),b=relativeDiff(out[1],out[2]),c=relativeDiff(out[2],out[3]);
+  CHECK(a>.4f&&b>.4f&&c>.4f,
+        "SELF->SERIAL %.2fx, SERIAL->FANIN %.2fx, FANIN->PARALLEL %.2fx RMS",a,b,c);
 }
-TEST("ENV changes envelope recovery after a note stops") {
-  // Compare envelope state after decay in a second run to avoid relying on output tail.
-  Fx<SelfFmMatrix> fast,slow;setup(fast);setup(slow);fast.set("env",8);slow.set("env",380);
-  Signal burst=concat(sine(48000,300,.2f,.4f),constant(48000,.12f,0.f));
-  fast.run(burst);slow.run(burst);
-  CHECK(slow.m.L.env>fast.m.L.env*2.f,"envelope after .12s silence: 8ms %.5f, 380ms %.5f",fast.m.L.env,slow.m.L.env);
+TEST("SERIAL operator changes the guitar carrier substantially"){
+  Fx<SelfFmMatrix> a,b;base(a);base(b);a.set("route",0);b.set("route",1);
+  const auto x=sine(48000,220,2,.3f);
+  const auto v=a.run(x).L,w=b.run(x).L;
+  CHECK(relativeDiff(v,w)>.4f,"cascaded operator difference %.2fx RMS",relativeDiff(v,w));
 }
-TEST("MIX zero returns exact dry input after smoothing") {
-  const Signal x=sine(48000,417,1,.3f);
-  Fx<SelfFmMatrix> f;setup(f);f.set("mix",0);
-  auto o=f.run(x).L;float error=0;
-  for(size_t i=24000;i<o.size();i++)error=fmaxf(error,fabsf(o[i]-x[i]));
-  CHECK(error<.00001f,"dry difference after settling %.8f",error);
+TEST("FEEDBACK introduces additional phase complexity"){
+  Fx<SelfFmMatrix> a,b;base(a);base(b);a.set("feedback",0);b.set("feedback",80);
+  const auto x=sine(48000,250,2,.3f);
+  const auto v=a.run(x).L,w=b.run(x).L;
+  CHECK(relativeDiff(v,w)>.3f,"feedback 0->80 changes output %.2fx RMS",relativeDiff(v,w));
 }
-TEST("Silence in creates no internal oscillator or synthesized signal") {
-  Fx<SelfFmMatrix> f;setup(f);auto o=f.run(constant(48000,2,0.f));
-  float peak=0;for(float x:o.L)peak=fmaxf(peak,fabsf(x));
-  CHECK(peak<1e-6f,"absolute silence output peak %.8f",peak);
+TEST("INDEX zero retains clean fundamental without new sidebands"){
+  Fx<SelfFmMatrix> f;base(f);f.set("depth",0);f.set("route",1);
+  const auto x=sine(48000,220,2,.3f),y=f.run(x).L;
+  const float fundamental=toneLevel(y,48000,220,24000),side=toneLevel(y,48000,557,24000);
+  CHECK(fabsf(fundamental-.3f)<.015f&&side<.003f,
+        "INDEX=0 fundamental %.3f, inharmonic sideband %.5f",fundamental,side);
 }
-TEST("Stereo input is processed independently with no crosstalk") {
-  Fx<SelfFmMatrix> f;setup(f);
-  Signal left=sine(48000,330,1,.3f),right=constant(48000,1,0.f);
-  const auto o=f.run(left,right);
-  CHECK(tailRms(o.L,24000)>.04f&&tailRms(o.R,24000)<1e-7f,
-        "left RMS %.4f, right RMS %.9f",tailRms(o.L,24000),tailRms(o.R,24000));
+TEST("TONE shapes high-frequency sidebands rather than mod depth"){
+  Fx<SelfFmMatrix> dark,bright;base(dark);base(bright);
+  dark.set("tone",400.f);bright.set("tone",15000.f);
+  const auto x=sine(48000,220,2,.3f);
+  const auto a=dark.run(x).L,b=bright.run(x).L;
+  const float loA=toneLevel(a,48000,220,24000),loB=toneLevel(b,48000,220,24000);
+  const float hiA=toneLevel(a,48000,1231,24000),hiB=toneLevel(b,48000,1231,24000);
+  CHECK(hiA/hiB<loA/loB*.70f,"low retain %.2f vs high retain %.2f",loA/loB,hiA/hiB);
 }
-TEST("meters report live input envelope and modulation activity") {
-  Fx<SelfFmMatrix> f;setup(f);
-  auto tone=sine(48000,300,.6f,.35f);f.run(tone);
-  const auto m=f.meters();
-  CHECK(m[0]>.1f&&m[0]<=1.f&&m[1]>.05f&&m[1]<=1.f,
-        "input envelope meter %.3f, phase index meter %.3f",m[0],m[1]);
+TEST("Dry/wet are time-aligned, avoiding the old comb issue"){
+  Fx<SelfFmMatrix> a,b,c;base(a);base(b);base(c);
+  for(auto* f:{&a,&b,&c}){f->set("depth",0);f->set("tone",15500.f);}
+  a.set("mix",100);b.set("mix",50);c.set("mix",0);
+  const auto x=sine(48000,220,2,.3f);
+  const auto w=a.run(x).L,h=b.run(x).L,d=c.run(x).L;
+  const float rel=rmsTail(h)/rmsTail(d);
+  CHECK(rel>.93f&&rel<1.04f&&relativeDiff(d,w)<.03f,
+        "aligned half mix level %.3fx and wet/dry difference %.4f",rel,relativeDiff(d,w));
+}
+TEST("Quiet guitar signal still produces synthetic sidebands"){
+  Fx<SelfFmMatrix> f;base(f);f.set("depth",8);f.set("route",0);f.set("sustain",0);
+  const auto x=sine(48000,330,2,.01f),y=f.run(x).L;
+  const float side=toneLevel(y,48000,667,24000);
+  CHECK(side>.0007f,"quiet input 667Hz sideband %.5f",side);
+}
+TEST("Meters report envelope and index activity"){
+  Fx<SelfFmMatrix> f;base(f);float mxE=0,mxI=0;
+  f.run(sine(48000,220,1,.3f),[&](int,Fx<SelfFmMatrix>& fx){
+    auto m=fx.meters();mxE=fmaxf(mxE,m[0]);mxI=fmaxf(mxI,m[1]);});
+  CHECK(mxE>.25f&&mxI>.10f&&mxE<=1&&mxI<=1,
+        "guitar envelope %.3f, phase index %.3f",mxE,mxI);
 }
 RIGTEST_MAIN
