@@ -1,7 +1,8 @@
-// HOLOPLATE v2 — spectral memory delay + modal plate reverb. A 2D bending-mode plate
+// HOLOPLATE v2.1 — alternating-phase spatial plate / spectral memory delay + modal plate reverb. A 2D bending-mode plate
 // imprinted with an interference mask sits in an energy-limited delay + diffuser.
 // TIME 70–1100 ms, FEEDBACK 0–90%, DECAY .35–7s, DIFFUSE 0–100%,
-// MORPH 0–100% (natural -> spectral hallucination), ANGLE 0–100%, DAMP, MIX.
+// MORPH 0–100% (natural -> alternating plate phase + upward spectral ghosts),
+// ANGLE 0–100%, DAMP, MIX. Low-frequency circulation is filtered in v2.1.
 #pragma once
 #include "module.h"
 
@@ -24,7 +25,7 @@ inline constexpr ModuleDesc HOLOPLATE_DESC = {
 // Each mode is an independently decaying component of a rectangular bending plate.
 // Spatial projection and an interference mask establish excitation/pickup weights.
 struct HoloMode {
-  float y1=0.f, y2=0.f, a=0.f, b=0.f, injection=0.f, left=0.f, right=0.f;
+  float y1=0.f, y2=0.f, a=0.f, b=0.f, injection=0.f, opposite=0.f, left=0.f, right=0.f;
 };
 
 
@@ -124,7 +125,9 @@ struct HoloSpectrum {
       // nonphysical frequency migration and phase-front rotation.
       const float warp=strange*((2.f+13.f*angle)*fastSin(k*.053f+rotation+frame*.035f)
                        +k*(.017f+.085f*angle)*fastSin(k*.0157f+rotation*.63f+frame*.019f));
-      const float target=clampf(k+warp,1.f,(float)(N/2-2));
+      // The positive diffraction order places displaced partials above their
+      // source bin instead of sweeping fundamentals toward DC in the loop.
+      const float target=clampf(k+fabsf(warp),1.f,(float)(N/2-2));
       const int dest=(int)floorf(target);
       const float frac=target-dest;
       const float w0=fastSin((1.f-frac)*PI_F*.5f),w1=fastSin(frac*PI_F*.5f);
@@ -175,9 +178,24 @@ struct HoloSpectrum {
   }
 };
 
+// Two cheap cascaded first-order high-passes, for energy circulating in the
+// memory loop. Dry input and the first delay echo are never filtered here.
+struct HoloHighPass {
+  float low1=0.f,low2=0.f,alpha=.018f;
+  void init(float sr,float hz){alpha=1.f-expf(-2.f*PI_F*hz/sr);clear();}
+  void clear(){low1=low2=0.f;}
+  float tick(float x){
+    low1=undenorm(low1+alpha*(x-low1));
+    const float high=x-low1;
+    low2=undenorm(low2+alpha*(high-low2));
+    return high-low2;
+  }
+};
+
 struct HoloPlate final : Module {
   static constexpr int MODES = 36;
-  DelayLine<131072> delayL, delayR;      // up to 1.1 s at 96 kHz
+  DelayLine<131072> delayL, delayR;      // odd repeats: input -> A -> B -> A ...
+  DelayLine<131072> delayBL, delayBR;     // even repeats: opposite plate excitation
   DelayLine<16384> network[4];
   Allpass diffuse1, diffuse2;
   HoloMode modal[MODES];
@@ -185,7 +203,10 @@ struct HoloPlate final : Module {
   OnePole timeS, feedbackS, decayS, diffuseS, imprintS, angleS, dampS, mixS;
   float lp[4]={};
   float echoLevel=0.f, plateLevel=0.f, feedbackL=0.f, feedbackR=0.f;
-  float repeatLpL=0.f, repeatLpR=0.f;
+  float repeatLpL=0.f, repeatLpR=0.f, repeatLpBL=0.f, repeatLpBR=0.f;
+  float aEnergy=0.f,bEnergy=0.f;
+  HoloHighPass returnHpL, returnHpR, returnHpBL, returnHpBR;
+  HoloHighPass plateDriveHp,plateAlternateHp;
   float delayOldMs=0.f,delayNewMs=0.f,delayXfade=1.f;
   unsigned counter=0;
   float lengths[4]={}, rt[4]={};
@@ -198,14 +219,21 @@ struct HoloPlate final : Module {
     diffuse1.init((int)(.0063f*sr),.62f);
     diffuse2.init((int)(.0091f*sr),.57f);
     spectrum.init(sr);
+    returnHpL.init(sr,145.f);returnHpR.init(sr,145.f);
+    returnHpBL.init(sr,145.f);returnHpBR.init(sr,145.f);
+    plateDriveHp.init(sr,130.f);plateAlternateHp.init(sr,130.f);
     reset();
   }
   void reset() override {
-    delayL.clear();delayR.clear();for(auto& x:network)x.clear();
+    delayL.clear();delayR.clear();delayBL.clear();delayBR.clear();
+    for(auto& x:network)x.clear();
     diffuse1.clear();diffuse2.clear();spectrum.clear();
+    returnHpL.clear();returnHpR.clear();returnHpBL.clear();returnHpBR.clear();
+    plateDriveHp.clear();plateAlternateHp.clear();
     for(auto& m:modal)m=HoloMode{};
     for(float& x:lp)x=0.f;
-    echoLevel=plateLevel=feedbackL=feedbackR=repeatLpL=repeatLpR=0.f; counter=0;
+    echoLevel=plateLevel=feedbackL=feedbackR=repeatLpL=repeatLpR=repeatLpBL=repeatLpBR=0.f;
+    aEnergy=bEnergy=0.f;counter=0;
     timeS.y=map(0,HOLOPLATE_PARAMS[0].def);
     delayOldMs=delayNewMs=timeS.y;delayXfade=1.f;
     feedbackS.y=map(1,HOLOPLATE_PARAMS[1].def)*.01f;
@@ -236,7 +264,16 @@ struct HoloPlate final : Module {
       const float inputShape=sinf(mx*PI_F*.39f)*sinf(ny*PI_F*.43f);
       const float pupilL=sinf(mx*PI_F*.19f)*sinf(ny*PI_F*.62f);
       const float pupilR=sinf(mx*PI_F*.72f)*sinf(ny*PI_F*.28f);
-      mode.injection=.0022f*(48000.f/sr)*(48000.f/sr)*inputShape*(1.f+.87f*imprint*interference);
+      const float lowTilt=frequency*frequency/(frequency*frequency+155.f*155.f);
+      const float gain=.0022f*(48000.f/sr)*(48000.f/sr)*lowTilt;
+      mode.injection=gain*inputShape*(1.f+.87f*imprint*interference);
+      // Opposing strike location and inverted bending-wave displacement on the
+      // second/fourth/etc repeats. At MORPH zero both positions match exactly.
+      const float farX=.72f+.08f*cosf(phase),farY=.29f+.11f*sinf(phase);
+      const float farShape=sinf(mx*PI_F*farX)*sinf(ny*PI_F*farY);
+      const float farInterference=cosf(mx*2.17f-ny*.93f-phase);
+      const float flipped=-gain*farShape*(1.f+.87f*imprint*farInterference);
+      mode.opposite=(1.f-imprint)*mode.injection+imprint*flipped;
       mode.left=.22f*pupilL*(1.f+.8f*imprint*cosf(phase+mx*.62f-ny*1.23f));
       mode.right=.22f*pupilR*(1.f+.8f*imprint*cosf(phase-mx*1.11f+ny*.49f));
     }
@@ -269,17 +306,27 @@ struct HoloPlate final : Module {
       const float interp=delayXfade;
       const float oldTap=clampf(delayOldMs*.001f*sr,2.f,131066.f);
       const float newTap=clampf(delayNewMs*.001f*sr,2.f,131066.f);
-      const float echoL=delayL.tap(oldTap)*(1.f-interp)+delayL.tap(newTap)*interp;
-      const float echoR=delayR.tap(oldTap)*(1.f-interp)+delayR.tap(newTap)*interp;
+      const float echoAL=delayL.tap(oldTap)*(1.f-interp)+delayL.tap(newTap)*interp;
+      const float echoAR=delayR.tap(oldTap)*(1.f-interp)+delayR.tap(newTap)*interp;
+      const float echoBL=delayBL.tap(oldTap)*(1.f-interp)+delayBL.tap(newTap)*interp;
+      const float echoBR=delayBR.tap(oldTap)*(1.f-interp)+delayBR.tap(newTap)*interp;
+      const float echoL=echoAL+echoBL,echoR=echoAR+echoBR;
       delayXfade=fminf(1.f,delayXfade+1.f/(.055f*sr));
       const float monoInput=.5f*(xL+xR),monoEcho=.5f*(echoL+echoR);
+      const float monoA=.5f*(echoAL+echoAR),monoB=.5f*(echoBL+echoBR);
+      aEnergy=undenorm(aEnergy+.006f*(fabsf(monoA)-aEnergy));
+      bEnergy=undenorm(bEnergy+.006f*(fabsf(monoB)-bEnergy));
+      const float shareA=(aEnergy+.00001f)/(aEnergy+bEnergy+.00002f);
+      const float shareB=1.f-shareA;
       // Spectral memory is excited by the actual echoes: the first repeat is
       // recognizable; later passes are progressively reconstructed incorrectly.
       float ghostL=0.f,ghostR=0.f;
       if(morph>.002f)spectrum.tick(monoEcho,sr,morph,angle,decay,damp,ghostL,ghostR);
       const float ghostMix=morph*morph;
       const float ghostMono=.5f*(ghostL+ghostR);
-      const float excitation=.45f*monoInput+.60f*((1.f-ghostMix)*monoEcho+ghostMix*ghostMono);
+      const float excitation=plateDriveHp.tick(.45f*monoInput+.60f*((1.f-ghostMix)*monoEcho+ghostMix*ghostMono));
+      const float altExcitation=plateAlternateHp.tick(.60f*((1.f-ghostMix)*monoB+ghostMix*ghostMono*shareB));
+      const float firstExcitation=excitation-altExcitation;
       float modalL=0.f,modalR=0.f;
       // Adjacent modes are weakly coupled through the hologram. The tiny amount
       // is bounded by damping and produces evolving frequency-selective memory.
@@ -287,7 +334,8 @@ struct HoloPlate final : Module {
         HoloMode& m=modal[i];
         const float neighbor=modal[(i+5)%MODES].y1;
         const float coupling=.00004f*morph*(neighbor-m.y1);
-        const float y=clampf(m.a*m.y1-m.b*m.y2+m.injection*excitation+coupling,-2.f,2.f);
+        const float y=clampf(m.a*m.y1-m.b*m.y2+m.injection*firstExcitation+
+                             m.opposite*altExcitation+coupling,-2.f,2.f);
         m.y2=m.y1;m.y1=undenorm(y);
         modalL+=y*m.left;modalR+=y*m.right;
       }
@@ -312,14 +360,25 @@ struct HoloPlate final : Module {
       feedbackL=undenorm(.998f*feedbackL+.002f*revL);
       feedbackR=undenorm(.998f*feedbackR+.002f*revR);
       const float echoAlpha=.15f+.78f*(1.f-damp);
-      repeatLpL=undenorm(repeatLpL+echoAlpha*(echoL-repeatLpL));
-      repeatLpR=undenorm(repeatLpR+echoAlpha*(echoR-repeatLpR));
-      const float transformedL=(1.f-ghostMix)*repeatLpL+ghostMix*ghostL*2.3f;
-      const float transformedR=(1.f-ghostMix)*repeatLpR+ghostMix*ghostR*2.3f;
-      delayL.push(clampf(xL+fb*((1.f-recycle)*transformedL+recycle*feedbackL),-3.f,3.f));
-      delayR.push(clampf(xR+fb*((1.f-recycle)*transformedR+recycle*feedbackR),-3.f,3.f));
-      const float wetL=(1.f-diff)*echoL+diff*revL;
-      const float wetR=(1.f-diff)*echoR+diff*revR;
+      repeatLpL=undenorm(repeatLpL+echoAlpha*(echoAL-repeatLpL));
+      repeatLpR=undenorm(repeatLpR+echoAlpha*(echoAR-repeatLpR));
+      repeatLpBL=undenorm(repeatLpBL+echoAlpha*(echoBL-repeatLpBL));
+      repeatLpBR=undenorm(repeatLpBR+echoAlpha*(echoBR-repeatLpBR));
+      const float directReturn=1.f-.75f*ghostMix;
+      const float ghostA=.75f*ghostMix*shareA,ghostB=.75f*ghostMix*shareB;
+      const float transformedAL=directReturn*repeatLpL+ghostA*ghostL;
+      const float transformedAR=directReturn*repeatLpR+ghostA*ghostR;
+      const float transformedBL=directReturn*repeatLpBL+ghostB*ghostL;
+      const float transformedBR=directReturn*repeatLpBR+ghostB*ghostR;
+      const float loopGain=fb*(1.f-.18f*ghostMix);
+      // Cross feed only: an A repeat creates B on the next lap and vice versa.
+      // The opposite plate position is driven by the actual B delay buffers.
+      delayL.push(clampf(xL+loopGain*returnHpL.tick((1.f-recycle)*transformedBL+.5f*recycle*feedbackL),-3.f,3.f));
+      delayR.push(clampf(xR+loopGain*returnHpR.tick((1.f-recycle)*transformedBR+.5f*recycle*feedbackR),-3.f,3.f));
+      delayBL.push(clampf(loopGain*returnHpBL.tick((1.f-recycle)*transformedAL+.5f*recycle*feedbackL),-3.f,3.f));
+      delayBR.push(clampf(loopGain*returnHpBR.tick((1.f-recycle)*transformedAR+.5f*recycle*feedbackR),-3.f,3.f));
+      const float wetL=(1.f-diff)*(echoL+4.0f*ghostMix*shareB*ghostL)+diff*revL;
+      const float wetR=(1.f-diff)*(echoR+4.0f*ghostMix*shareB*ghostR)+diff*revR;
       outL[s]=clampf(xL*(1.f-mix)+wetL*mix,-4.f,4.f);
       outR[s]=clampf(xR*(1.f-mix)+wetR*mix,-4.f,4.f);
       echoLevel=undenorm(echoLevel+.001f*(clampf(fmaxf(fabsf(echoL),fabsf(echoR)),0.f,1.f)-echoLevel));
