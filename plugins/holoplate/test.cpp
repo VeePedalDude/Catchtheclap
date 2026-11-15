@@ -123,21 +123,60 @@ static Signal repeatNote(float morph,float angle=70.f){
   fx.set("morph",morph);fx.set("angle",angle);fx.set("damp",10);
   return fx.run(noteBurst()).L;
 }
-TEST("MORPH zero retains the PLATE MEMORY signal path after control settling") {
+TEST("MORPH zero preserves the natural first delay repeat despite the LF return filter") {
   Fx<HoloPlate> v2;Fx<rig::PlateMemory> v1;
-  v2.set("time",250);v1.set("time",250);
-  v2.set("feedback",60);v1.set("feedback",60);
-  v2.set("diffuse",100);v1.set("diffuse",100);
-  v2.set("morph",0);v1.set("imprint",0);
-  v2.set("angle",80);v1.set("angle",80);
-  v2.set("mix",100);v1.set("mix",100);
-  // Match the starting smoother states: the classic defaults to 48% imprint.
-  v1.m.imprintS.y=0.f;v1.m.configure(v1.m.decayS.y,0.f,v1.m.angleS.y,v1.m.dampS.y);
-  Signal impulse(size_t(2.7f*SR),0.f);impulse[size_t(SR*1.0f)]=1.f;
-  const Signal newer=v2.run(impulse).L,classic=v1.run(impulse).L;
-  float worst=0;
-  for(size_t i=size_t(SR*.98f);i<newer.size();i++)worst=fmaxf(worst,fabsf(newer[i]-classic[i]));
-  CHECK(worst<.000001f,"MORPH 0, max classic-path error %.9f",worst);
+  for(auto* f:{&v2}){settings(*f,0,75);f->set("morph",0);f->set("angle",80);}
+  v1.set("time",250);v1.set("feedback",75);v1.set("diffuse",0);
+  v1.set("imprint",0);v1.set("angle",80);v1.set("mix",100);
+  const Signal in=strike(1.2f);
+  const Signal y=v2.run(in).L,x=v1.run(in).L;
+  float error=0;
+  for(size_t i=size_t(.42f*SR);i<size_t(.49f*SR);i++)error=fmaxf(error,fabsf(y[i]-x[i]));
+  CHECK(error<.00001f,"uncolored first echo compared with classic: maximum error %.8f",error);
+}
+TEST("A and B are actual alternating delay generations") {
+  Fx<HoloPlate> f;settings(f,0,80);f.set("morph",100);f.set("damp",0);
+  Signal in(size_t(SR),0.f);in[size_t(.20f*SR)]=1.f;
+  f.run(in);
+  const float a0=f.m.delayL.tap(.80f*SR),b0=f.m.delayBL.tap(.80f*SR);
+  const float a1=f.m.delayL.tap(.55f*SR),b1=f.m.delayBL.tap(.55f*SR);
+  const float a2=f.m.delayL.tap(.30f*SR),b2=f.m.delayBL.tap(.30f*SR);
+  CHECK(a0>.9f&&fabsf(b0)<.00001f&&fabsf(a1)<.0001f&&b1>.08f&&
+        a2>.015f&&fabsf(b2)<a2*.10f,
+        "repeat generation A input %.3f / B %.3f; B second %.3f / A %.4f; A third %.3f / B %.4f",
+        a0,b0,b1,a1,a2,b2);
+}
+TEST("Plate excitation alternates position and polarity as MORPH increases") {
+  rig::HoloPlate f;f.init(SR);
+  f.configure(3.f,0.f,.83f,.3f);
+  float unshifted=0;
+  for(const auto& m:f.modal)unshifted=fmaxf(unshifted,fabsf(m.injection-m.opposite));
+  f.configure(3.f,1.f,.83f,.3f);
+  int signSwaps=0;float difference=0;
+  for(const auto& m:f.modal){
+    if(m.injection*m.opposite<0)signSwaps++;
+    difference+=fabsf(m.injection-m.opposite);
+  }
+  CHECK(unshifted<1.e-9f&&signSwaps>=14&&difference>.02f,
+        "natural imprint mismatch %.8f; flipped modes %d/36, summed excitation change %.5f",
+        unshifted,signSwaps,difference);
+}
+TEST("110Hz high-feedback input decays rather than running away") {
+  for(float diff:{0.f,100.f}) {
+    Fx<HoloPlate> f;settings(f,diff,88,7);f.set("time",220);f.set("morph",100);
+    f.set("angle",85);f.set("damp",75);
+    Signal input(size_t(8*SR),0.f);
+    for(int i=0;i<2*int(SR);i++) {
+      const float attack=fminf(1.f,i/(.1f*SR));
+      input[(size_t)i]=.28f*sinf(2.f*rig::PI_F*110.f*i/SR)*attack;
+    }
+    const Signal y=f.run(input).L;
+    const double early=between(y,2.f,3.f),late=between(y,6.f,8.f);
+    const float level=peak(y);
+    CHECK(late<.065&&late<early*.25&&level<1.5f,
+          "DIFFUSE %.0f%%: 110Hz RMS 2-3s %.5f, 6-8s %.5f, peak %.4f",
+          diff,early,late,level);
+  }
 }
 TEST("Spectral reconstruction generates strong inharmonic components") {
   const Signal natural=repeatNote(0),strange=repeatNote(100);
