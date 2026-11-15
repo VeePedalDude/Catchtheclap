@@ -1,0 +1,15 @@
+{
+  "struct": "rig::HoloPlate",
+  "kind": "effect",
+  "category": "reverb",
+  "tags": [
+    "spectral",
+    "delay",
+    "reverb",
+    "hologram",
+    "memory",
+    "FFT"
+  ],
+  "author": "KC",
+  "version": "2.1.0"
+}
