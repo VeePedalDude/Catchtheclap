@@ -37,6 +37,7 @@ struct HoloPlate final : Module {
   float lp[4]={};
   float echoLevel=0.f, plateLevel=0.f, feedbackL=0.f, feedbackR=0.f;
   float repeatLpL=0.f, repeatLpR=0.f;
+  float delayOldMs=0.f,delayNewMs=0.f,delayXfade=1.f;
   unsigned counter=0;
   float lengths[4]={}, rt[4]={};
   const ModuleDesc& desc() const override {return HOLOPLATE_DESC;}
@@ -56,6 +57,7 @@ struct HoloPlate final : Module {
     for(float& x:lp)x=0.f;
     echoLevel=plateLevel=feedbackL=feedbackR=repeatLpL=repeatLpR=0.f; counter=0;
     timeS.y=map(0,HOLOPLATE_PARAMS[0].def);
+    delayOldMs=delayNewMs=timeS.y;delayXfade=1.f;
     feedbackS.y=map(1,HOLOPLATE_PARAMS[1].def)*.01f;
     decayS.y=map(2,HOLOPLATE_PARAMS[2].def);
     diffuseS.y=map(3,HOLOPLATE_PARAMS[3].def)*.01f;
@@ -84,7 +86,7 @@ struct HoloPlate final : Module {
       const float inputShape=sinf(mx*PI_F*.39f)*sinf(ny*PI_F*.43f);
       const float pupilL=sinf(mx*PI_F*.19f)*sinf(ny*PI_F*.62f);
       const float pupilR=sinf(mx*PI_F*.72f)*sinf(ny*PI_F*.28f);
-      mode.injection=.0022f*inputShape*(1.f+.87f*imprint*interference);
+      mode.injection=.0022f*(48000.f/sr)*inputShape*(1.f+.87f*imprint*interference);
       mode.left=.22f*pupilL*(1.f+.8f*imprint*cosf(phase+mx*.62f-ny*1.23f));
       mode.right=.22f*pupilR*(1.f+.8f*imprint*cosf(phase-mx*1.11f+ny*.49f));
     }
@@ -102,13 +104,24 @@ struct HoloPlate final : Module {
     const float dampTarget=map(6,e[6])*.01f,mixTarget=map(7,e[7])*.01f;
     for(int s=0;s<count;s++){
       const float xL=inL[s],xR=inR[s];
-      const float time=timeS.next(timeTarget),fb=feedbackS.next(fbTarget);
+      timeS.next(timeTarget);const float fb=feedbackS.next(fbTarget);
       const float decay=decayS.next(decayTarget),diff=diffuseS.next(diffuseTarget);
       const float imprint=imprintS.next(imprintTarget),angle=angleS.next(angleTarget);
       const float damp=dampS.next(dampTarget),mix=mixS.next(mixTarget);
       if((counter++&63u)==0u)configure(decay,imprint,angle,damp);
-      const float tap=clampf(time*.001f*sr,2.f,131066.f);
-      const float echoL=delayL.tap(tap),echoR=delayR.tap(tap);
+      // Two stationary read heads: crossfade substantial TIME changes rather than
+      // sweeping one head across recorded audio (audible Doppler and discontinuities).
+      if(fabsf(timeTarget-delayNewMs)>12.f){
+        delayOldMs=delayOldMs*(1.f-delayXfade)+delayNewMs*delayXfade;
+        delayNewMs=timeTarget;
+        delayXfade=0.f;
+      }
+      const float interp=delayXfade;
+      const float oldTap=clampf(delayOldMs*.001f*sr,2.f,131066.f);
+      const float newTap=clampf(delayNewMs*.001f*sr,2.f,131066.f);
+      const float echoL=delayL.tap(oldTap)*(1.f-interp)+delayL.tap(newTap)*interp;
+      const float echoR=delayR.tap(oldTap)*(1.f-interp)+delayR.tap(newTap)*interp;
+      delayXfade=fminf(1.f,delayXfade+1.f/(.055f*sr));
       const float monoInput=.5f*(xL+xR),monoEcho=.5f*(echoL+echoR);
       const float excitation=.45f*monoInput+.60f*monoEcho;
       float modalL=0.f,modalR=0.f;
