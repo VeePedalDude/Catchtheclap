@@ -86,7 +86,7 @@ struct HoloPlate final : Module {
       const float inputShape=sinf(mx*PI_F*.39f)*sinf(ny*PI_F*.43f);
       const float pupilL=sinf(mx*PI_F*.19f)*sinf(ny*PI_F*.62f);
       const float pupilR=sinf(mx*PI_F*.72f)*sinf(ny*PI_F*.28f);
-      mode.injection=.0022f*(48000.f/sr)*inputShape*(1.f+.87f*imprint*interference);
+      mode.injection=.0022f*(48000.f/sr)*(48000.f/sr)*inputShape*(1.f+.87f*imprint*interference);
       mode.left=.22f*pupilL*(1.f+.8f*imprint*cosf(phase+mx*.62f-ny*1.23f));
       mode.right=.22f*pupilR*(1.f+.8f*imprint*cosf(phase-mx*1.11f+ny*.49f));
     }
