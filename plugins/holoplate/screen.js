@@ -1,78 +1,53 @@
-// HOLOPLATE: spatial interference fringes and separate delay/reverb energy.
-// The geometry is illustrative. Audio comes from the compiled modal engine.
-screen('holoplate', (c, b, m, h) => {
-  const limit = x => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
-  const t = h.T || 0;
-  const diff = limit(h.eff(3));
-  const imprint = limit(h.eff(4));
-  const angle = limit(h.eff(5));
-  const energy = limit(h.meter('plate', 0));
-  const echo = limit(h.meter('echo', 0));
-  const accent = h.col.accent, ink = h.col.text;
-  const w = b.w, ht = b.h;
-  const cx = b.x + w * .50, cy = b.y + ht * .49;
-  const plateW = w * .80, plateH = ht * .53;
-  const fs = Math.max(7, Math.min(13, ht * .075));
-  c.save();
-  c.lineCap = 'round';
-  c.textAlign = 'center'; c.textBaseline = 'middle';
-  const font = (str, maxWidth) => {
-    let size = fs;
-    while (size > 7) {
-      c.font = 'bold ' + size + 'px monospace';
-      if (c.measureText(str).width <= maxWidth) break;
-      size--;
+// HOLOPLATE v2: conceptual live spectral reconstruction panel. Spectrum bands
+// represent the current MORPH/ANGLE mapping, not literal analyzed FFT values.
+screen('holoplate', (c,b,m,h) => {
+  const clamp=x=>Math.max(0,Math.min(1,Number.isFinite(x)?x:0));
+  const morph=clamp(h.eff(4)),angle=clamp(h.eff(5));
+  const diffuse=clamp(h.eff(3)),plate=clamp(h.meter('plate',0));
+  const echo=clamp(h.meter('echo',0)),t=h.T||0;
+  const w=b.w,ht=b.h,x0=b.x+w*.10,x1=b.x+w*.90;
+  const cy=b.y+ht*.53,ac=h.col.accent,ink=h.col.text;
+  const fs=Math.max(7,Math.min(13,ht*.075));
+  c.save();c.lineCap='round';c.lineJoin='round';
+  c.textAlign='center';c.textBaseline='middle';
+  const fit=(s,width)=>{let px=fs;for(;px>7;px--){c.font='bold '+px+'px monospace';if(c.measureText(s).width<=width)break;}return 'bold '+px+'px monospace';};
+  const title=morph<.15?'PLEASANT PLATE':morph>.83?'SPECTRAL ABERRATION':'HOLOGRAPHIC RECALL';
+  c.fillStyle=ink;c.globalAlpha=.95;c.font=fit(title,w*.9);c.fillText(title,b.x+w*.5,b.y+ht*.10);
+  // The lower half represents the real 1024-point reconstruction as spectral
+  // lanes. Their drawn displacement tracks MORPH and ANGLE.
+  const rows=17,spacing=(x1-x0)/(rows-1),maxH=ht*.25;
+  for(let i=0;i<rows;i++){
+    const pos=i/(rows-1),xi=x0+i*spacing;
+    const ghostShift=morph*morph*(.08+.22*angle)*Math.sin(i*.98+angle*6.28+t*.48);
+    const input=Math.pow(.84,i)*(.4+.6*Math.abs(Math.sin(i*.41+t*1.25)));
+    const rise=maxH*input*(.42+echo*.58);
+    c.strokeStyle=ink;c.globalAlpha=.13+.25*echo;c.lineWidth=Math.max(1,w*.005);
+    c.beginPath();c.moveTo(xi,cy+maxH*.46);c.lineTo(xi,cy+maxH*.46-rise);c.stroke();
+    const shifted=xi+ghostShift*w*.34;
+    c.strokeStyle=ac;c.globalAlpha=.12+.66*morph*(.25+plate);
+    c.lineWidth=Math.max(1.2,w*.01);
+    c.beginPath();c.moveTo(shifted,cy+maxH*.46);
+    c.lineTo(shifted,cy+maxH*.46-rise*(.5+.5*morph));c.stroke();
+    if(morph>.20){
+      c.strokeStyle=ac;c.globalAlpha=.09+.35*morph;
+      c.lineWidth=Math.max(.7,w*.004);
+      c.beginPath();c.moveTo(xi,cy+maxH*.46-rise*.3);
+      c.lineTo(shifted,cy+maxH*.46-rise*(.5+.5*morph));c.stroke();
     }
-    return 'bold ' + size + 'px monospace';
-  };
-  const title = diff < .20 ? 'DELAY MEMORY' : diff > .80 ? 'RESONANT PLATE' : 'DELAY / PLATE';
-  c.fillStyle = ink; c.globalAlpha = .93;
-  c.font = font(title, w * .9);
-  c.fillText(title, cx, b.y + ht * .11);
-  // An angled, outlined plate: the line-interference mask changes with ANGLE.
-  c.save();
-  c.translate(cx, cy);
-  c.rotate((angle - .5) * .38);
-  c.strokeStyle = ink; c.globalAlpha = .60;
-  c.lineWidth = Math.max(1, ht * .012);
-  c.beginPath(); c.rect(-plateW*.5, -plateH*.5, plateW, plateH); c.stroke();
-  c.beginPath(); c.rect(-plateW*.45, -plateH*.43, plateW*.90, plateH*.86); c.clip();
-  // Crossed phase fronts create a spatial fringe field, not a literal optical hologram.
-  const lines = 12;
-  for (let i = 0; i < lines; i++) {
-    const xx = (i / (lines - 1) - .5) * plateW * 1.24;
-    const yWave = Math.sin(t * 1.1 + i * .92) * ht * .026 * (0.1 + energy);
-    c.strokeStyle = (i % 2) ? accent : ink;
-    c.globalAlpha = .11 + imprint * .42 + energy * .12;
-    c.lineWidth = Math.max(.7, ht * .008);
-    c.beginPath(); c.moveTo(xx - plateH*.35, -plateH*.58 + yWave);
-    c.quadraticCurveTo(xx, 0 + yWave, xx + plateH*.30, plateH*.58 + yWave);
-    c.stroke();
   }
-  for (let i = 0; i < 9; i++) {
-    const yy = (i / 8 - .5) * plateH * 1.45;
-    const drift = Math.cos(t*.65 + i*.6 + angle*2*Math.PI) * plateW * .035;
-    c.strokeStyle = accent; c.globalAlpha = .06 + imprint * .26 + energy * .1;
-    c.beginPath();c.moveTo(-plateW*.58, yy-drift*.05);
-    c.quadraticCurveTo(drift, yy + plateH*.10*Math.sin(i*.7 + t*.33), plateW*.58, yy + drift*.05);
-    c.stroke();
+  // Optical-style curved phase fronts overlay the spectral map.
+  c.strokeStyle=ac;c.lineWidth=Math.max(.7,ht*.008);
+  for(let i=0;i<5;i++){
+    c.globalAlpha=.03+.27*morph*(.35+.65*plate);
+    const ripple=Math.sin(t*.65+i*.75+angle*6.28)*ht*.022*morph;
+    c.beginPath();c.ellipse(b.x+w*.50,cy+ht*.015+ripple,w*(.12+i*.085),ht*(.025+i*.04),
+                         (angle-.5)*.45,0,Math.PI*2);c.stroke();
   }
-  c.restore();
-  // Discrete repeats morph into a continuous reverb energy bar.
-  const barY = b.y + ht * .83, left = b.x + w * .10, barWidth = w * .80;
-  c.globalAlpha = .20; c.fillStyle = ink;
-  c.fillRect(left, barY, barWidth, Math.max(2, ht*.014));
-  for (let i = 0; i < 8; i++) {
-    const x = left + (i+.5)/8*barWidth;
-    const repetition = (1-diff)*Math.pow(.73,i);
-    const haze = diff*(.20+.8*Math.exp(-i*.22));
-    const strength = repetition*echo + haze*energy;
-    c.globalAlpha = Math.min(.9,.18 + strength*.75);
-    c.fillStyle = accent;
-    c.fillRect(x - barWidth*.02, barY-ht*.05*(repetition + haze), barWidth*.04, ht*.05*(repetition + haze));
-  }
-  const label = 'ECHO ' + Math.round(echo * 100) + '   /   PLATE ' + Math.round(energy * 100);
-  c.globalAlpha = .84; c.fillStyle = ink; c.font = font(label, w*.94);
-  c.fillText(label, cx, b.y + ht * .94);
+  const label='MORPH '+Math.round(morph*100)+'  /  '+(diffuse<.40?'ECHO':diffuse>.75?'PLATE':'HYBRID');
+  c.globalAlpha=.83;c.fillStyle=ink;c.font=fit(label,w*.9);
+  c.fillText(label,b.x+w*.5,b.y+ht*.84);
+  const bar=b.y+ht*.92,bw=w*.76;
+  c.globalAlpha=.23;c.fillStyle=ink;c.fillRect(b.x+w*.12,bar,bw,Math.max(2,ht*.012));
+  c.globalAlpha=.95;c.fillStyle=ac;c.fillRect(b.x+w*.12,bar,bw*morph,Math.max(2,ht*.012));
   c.restore();
 });

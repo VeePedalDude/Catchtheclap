@@ -1,0 +1,13 @@
+{
+  "struct": "rig::PlateMemory",
+  "kind": "effect",
+  "category": "reverb",
+  "tags": [
+    "plate",
+    "delay",
+    "modal",
+    "memory"
+  ],
+  "author": "KC",
+  "version": "1.0.0"
+}

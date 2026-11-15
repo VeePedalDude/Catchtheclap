@@ -1,6 +1,7 @@
 // HOLOPLATE behavior checks: measurable echoes, modal reverb and interference memory.
 #include "rigtest.h"
 #include "holoplate.h"
+#include "../platemem/platemem.h"
 using namespace rigtest;
 using rig::HoloPlate;
 static constexpr float SR=48000.f;
@@ -46,20 +47,20 @@ TEST("DECAY controls modal and diffused late energy") {
   CHECK(strong>weak*10 && strong>.00001,"tail short %.8f, tail long %.8f RMS",weak,strong);
 }
 TEST("ANGLE changes the modal interference projection") {
-  Fx<HoloPlate> a;settings(a,100);a.set("imprint",100);a.set("angle",0);
+  Fx<HoloPlate> a;settings(a,100);a.set("morph",100);a.set("angle",0);
   const Signal s=strike(2.0f);
   const auto x=a.run(s).L;
-  Fx<HoloPlate> b;settings(b,100);b.set("imprint",100);b.set("angle",50);
+  Fx<HoloPlate> b;settings(b,100);b.set("morph",100);b.set("angle",50);
   const auto y=b.run(s).L;
   double err=0,energy=0;size_t n=0;
   for(size_t i=size_t(.35f*SR);i<size_t(1.4f*SR);i++){const double d=x[i]-y[i];err+=d*d;energy+=y[i]*y[i];n++;}
   const double ratio=sqrt(err/double(n)),signal=sqrt(energy/double(n));
   CHECK(ratio>.0004 && ratio>signal*.2,"angle projection difference %.6f RMS / signal %.6f",ratio,signal);
 }
-TEST("IMPRINT changes sound, not just graphics") {
-  Fx<HoloPlate> a;settings(a,100);a.set("imprint",0);
+TEST("MORPH changes sound, not just graphics") {
+  Fx<HoloPlate> a;settings(a,100);a.set("morph",0);
   const Signal s=strike(2.0f);const auto x=a.run(s).L;
-  Fx<HoloPlate> b;settings(b,100);b.set("imprint",100);
+  Fx<HoloPlate> b;settings(b,100);b.set("morph",100);
   const auto y=b.run(s).L;
   double dist=0;size_t n=0;
   for(size_t i=size_t(.30f*SR);i<size_t(1.2f*SR);i++){const double d=x[i]-y[i];dist+=d*d;n++;}
@@ -99,4 +100,81 @@ TEST("Longest TIME fits at 96 kHz without cutting the delayed impulse") {
   const float peak1=peak(y,size_t(rate*1.298f),size_t(rate*1.302f));
   CHECK(peak1>.2,"96 kHz, 1.1 s TIME peak %.5f",peak1);
 }
+
+static Signal noteBurst(float duration=1.7f) {
+  Signal x(size_t(duration*SR),0.f);
+  const int length=int(.085f*SR),offset=int(.20f*SR);
+  for(int i=0;i<length;i++) {
+    const float ramp=fminf(1.f,fminf(i/160.f,(length-i)/160.f));
+    x[(size_t)(offset+i)]=.5f*sinf(2.f*rig::PI_F*441.f*i/SR)*ramp;
+  }
+  return x;
+}
+static float proj(const Signal& s,float hz,float a,float b) {
+  const int lo=int(a*SR), hi=int(b*SR);double real=0,imag=0;
+  for(int i=lo;i<hi;i++) {
+    const double phase=2.0*3.141592653589793*hz*i/SR;
+    real+=s[(size_t)i]*cos(phase);imag+=s[(size_t)i]*sin(phase);
+  }
+  return (float)(2.0*sqrt(real*real+imag*imag)/(hi-lo));
+}
+static Signal repeatNote(float morph,float angle=70.f){
+  Fx<HoloPlate> fx;settings(fx,0,85,3.f);
+  fx.set("morph",morph);fx.set("angle",angle);fx.set("damp",10);
+  return fx.run(noteBurst()).L;
+}
+TEST("MORPH zero retains the PLATE MEMORY signal path after control settling") {
+  Fx<HoloPlate> v2;Fx<rig::PlateMemory> v1;
+  v2.set("time",250);v1.set("time",250);
+  v2.set("feedback",60);v1.set("feedback",60);
+  v2.set("diffuse",100);v1.set("diffuse",100);
+  v2.set("morph",0);v1.set("imprint",0);
+  v2.set("angle",80);v1.set("angle",80);
+  v2.set("mix",100);v1.set("mix",100);
+  // Match the starting smoother states: the classic defaults to 48% imprint.
+  v1.m.imprintS.y=0.f;v1.m.configure(v1.m.decayS.y,0.f,v1.m.angleS.y,v1.m.dampS.y);
+  Signal impulse(size_t(2.7f*SR),0.f);impulse[size_t(SR*1.0f)]=1.f;
+  const Signal newer=v2.run(impulse).L,classic=v1.run(impulse).L;
+  float worst=0;
+  for(size_t i=size_t(SR*.98f);i<newer.size();i++)worst=fmaxf(worst,fabsf(newer[i]-classic[i]));
+  CHECK(worst<.000001f,"MORPH 0, max classic-path error %.9f",worst);
+}
+TEST("Spectral reconstruction generates strong inharmonic components") {
+  const Signal natural=repeatNote(0),strange=repeatNote(100);
+  const float nBase=proj(natural,441,.72f,.80f),nSide=proj(natural,950,.72f,.80f);
+  const float sBase=proj(strange,441,.72f,.80f),sSide=proj(strange,950,.72f,.80f);
+  const float ratioOld=nSide/(nBase+1e-8f),ratioNew=sSide/(sBase+1e-8f);
+  CHECK(sSide>.010f && ratioNew>ratioOld*15.f,
+        "950 Hz inharmonic partial %.5f (classic %.5f), spectral ratio %.3f (classic %.3f)",
+        sSide,nSide,ratioNew,ratioOld);
+}
+TEST("MORPH varies tone, not just loudness, across the middle") {
+  const Signal natural=repeatNote(0),half=repeatNote(50),strange=repeatNote(100);
+  auto cosine=[&](const Signal& b){double ab=0,aa=0,bb=0;
+    for(size_t i=size_t(.725f*SR);i<size_t(.80f*SR);i++){
+      ab+=natural[i]*b[i];aa+=natural[i]*natural[i];bb+=b[i]*b[i];
+    }
+    return (float)(ab/sqrt(aa*bb+1e-30));
+  };
+  const float moderate=cosine(half),absurd=cosine(strange);
+  CHECK(moderate<.95f && absurd<.5f && moderate>absurd+.20f,
+        "repeat correlation to natural: midpoint %.3f, absurd %.3f",moderate,absurd);
+}
+TEST("The first repeat remains recognizable while later echoes mutate") {
+  const auto natural=repeatNote(0),strange=repeatNote(100);
+  const float firstA=(float)between(natural,.46f,.52f),firstB=(float)between(strange,.46f,.52f);
+  const float laterA=proj(natural,441,.72f,.80f),laterB=proj(strange,441,.72f,.80f);
+  CHECK(fabsf(firstA-firstB)<.002f && laterB<laterA*.45f,
+        "first-repeat levels %.4f / %.4f; later 441 Hz fundamental %.4f / %.4f",firstA,firstB,laterA,laterB);
+}
+TEST("ANGLE changes actual reconstructed spectral data") {
+  const Signal near=repeatNote(100,0),far=repeatNote(100,100);
+  double d=0,e=0;
+  for(size_t i=size_t(.70f*SR);i<size_t(1.1f*SR);i++){
+    const double diff=near[i]-far[i];d+=diff*diff;e+=near[i]*near[i];
+  }
+  const float ratio=(float)sqrt(d/(e+1e-30));
+  CHECK(ratio>.45f,"spectral reconstruction angle changes output: normalized RMS difference %.3f",ratio);
+}
+
 RIGTEST_MAIN
