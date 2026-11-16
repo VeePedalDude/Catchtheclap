@@ -1,0 +1,13 @@
+{
+  "struct": "rig::Bitlab",
+  "kind": "effect",
+  "category": "experimental",
+  "tags": [
+    "bitcrusher",
+    "lofi",
+    "glitch",
+    "dust"
+  ],
+  "author": "KC",
+  "version": "3.0.0"
+}
